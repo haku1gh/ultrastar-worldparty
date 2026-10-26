@@ -1,64 +1,64 @@
 {
     "name": "Free Pascal compile",
-    "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-    "args": ["{PROJECT_PATH}", "compile-debug"],
+    "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+    "args": ["{PROJECT_PATH}", "compile"],
     "cwd": "{PROJECT_PATH}",
-    "sh": false,
-    "atomCommandName": "worldparty:compile-debug",
+    "sh": true,
+    "atomCommandName": "worldparty:compile",
     "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
     "keymap": "f9",
     "targets": {
         "Free Pascal compile dll": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
             "args": ["{PROJECT_PATH}", "compile-dll"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
+            "sh": true,
             "atomCommandName": "worldparty:compile-dll",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "alt-f9"
         },
         "Free Pascal compile debug mode": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-            "args": ["{PROJECT_PATH}", "compile"],
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+            "args": ["{PROJECT_PATH}", "compile-debug"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
-            "atomCommandName": "worldparty:compile",
+            "sh": true,
+            "atomCommandName": "worldparty:compile-debug",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "ctrl-f9"
         },
         "Free Pascal compile and execute": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-            "args": ["{PROJECT_PATH}", "compile-debug-execute"],
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+            "args": ["{PROJECT_PATH}", "compile-execute"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
-            "atomCommandName": "worldparty:compile-debug-execute",
+            "sh": true,
+            "atomCommandName": "worldparty:compile-execute",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "f10"
         },
         "Free Pascal compile debug and execute": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-            "args": ["{PROJECT_PATH}", "compile-execute"],
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+            "args": ["{PROJECT_PATH}", "compile-debug-execute"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
-            "atomCommandName": "worldparty:compile-execute",
+            "sh": true,
+            "atomCommandName": "worldparty:compile-debug-execute",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "ctrl-f10"
         },
-        "Free Pascal execute debug without compile": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-            "args": ["{PROJECT_PATH}", "execute-debug"],
+        "Free Pascal execute without compile": {
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+            "args": ["{PROJECT_PATH}", "execute"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
-            "atomCommandName": "worldparty:execute-debug",
+            "sh": true,
+            "atomCommandName": "worldparty:execute",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "f11"
         },
-        "Free Pascal execute without compile": {
-            "cmd": "{PROJECT_PATH}\\dists\\atom\\windows\\compile.bat",
-            "args": ["{PROJECT_PATH}", "execute"],
+        "Free Pascal execute debug without compile": {
+            "cmd": "{PROJECT_PATH}\\dists\\pulsar\\windows\\compile.bat",
+            "args": ["{PROJECT_PATH}", "execute-debug"],
             "cwd": "{PROJECT_PATH}",
-            "sh": false,
-            "atomCommandName": "worldparty:execute",
+            "sh": true,
+            "atomCommandName": "worldparty:execute-debug",
             "errorMatch": ["(?<file>.+)\\((?<line>\\d+)\\,(?<col>\\d+)\\) (?<message>.+)"],
             "keymap": "ctrl-f11"
         }
