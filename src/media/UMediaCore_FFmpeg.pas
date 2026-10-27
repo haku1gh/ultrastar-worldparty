@@ -1,8 +1,8 @@
 {*
     UltraStar WorldParty - Karaoke Game
-	
-	UltraStar WorldParty is the legal property of its developers, 
-	whose names	are too numerous to list here. Please refer to the 
+
+	UltraStar WorldParty is the legal property of its developers,
+	whose names	are too numerous to list here. Please refer to the
 	COPYRIGHT file distributed with this source distribution.
 
     This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program. Check "LICENSE" file. If not, see 
+    along with this program. Check "LICENSE" file. If not, see
 	<http://www.gnu.org/licenses/>.
  *}
 
@@ -103,31 +103,14 @@ uses
   SysUtils,
   UConfig;
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
-{ redeclaration of constants with the same names as deprecated
-  constants in order to reuse old callback definitions }
+{ Redeclaration of constants with the same names as the deprecated
+  constants of old libavformat versions in order to reuse the old
+  callback definitions }
 const
   URL_RDONLY = 0; (**< read-only *)
   URL_WRONLY = 1; (**< write-only *)
   URL_RDWR   = 2; (**< read-write *)
   BLOCKSIZE  = 4 * 1024;
-{$ELSE}
-function FFmpegStreamOpen(h: PURLContext; filename: PAnsiChar; flags: cint): cint; cdecl; forward;
-function FFmpegStreamRead(h: PURLContext; buf: PByteArray; size: cint): cint; cdecl; forward;
-function FFmpegStreamWrite(h: PURLContext; buf: PByteArray; size: cint): cint; cdecl; forward;
-function FFmpegStreamSeek(h: PURLContext; pos: cint64; whence: cint): cint64; cdecl; forward;
-function FFmpegStreamClose(h: PURLContext): cint; cdecl; forward;
-
-const
-  UTF8FileProtocol: TURLProtocol = (
-      name:      'ufile';
-      url_open:  FFmpegStreamOpen;
-      url_read:  FFmpegStreamRead;
-      url_write: FFmpegStreamWrite;
-      url_seek:  FFmpegStreamSeek;
-      url_close: FFmpegStreamClose;
-  );
-{$ENDIF}
 
 var
   Instance: TMediaCore_FFmpeg;
@@ -164,7 +147,6 @@ begin
         ['libavcodec', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
   end;
 
-  {$IF LIBAVFORMAT_VERSION >= 52020000} // 52.20.0
   libVersion := avformat_version();
   headerVersion := AV_VERSION_INT(
       LIBAVFORMAT_VERSION_MAJOR,
@@ -175,9 +157,7 @@ begin
     Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
         ['libavformat', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
   end;
-  {$IFEND}
 
-  {$IF LIBAVUTIL_VERSION >= 49008000} // 49.8.0
   libVersion := avutil_version();
   headerVersion := AV_VERSION_INT(
       LIBAVUTIL_VERSION_MAJOR,
@@ -188,9 +168,7 @@ begin
     Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
         ['libavutil', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
   end;
-  {$IFEND}
-  
-  {$IF LIBSWSCALE_VERSION >= 000006001} // 0.6.1
+
   libVersion := swscale_version();
   headerVersion := AV_VERSION_INT(
       LIBSWSCALE_VERSION_MAJOR,
@@ -201,7 +179,6 @@ begin
     Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
         ['libswscale', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
   end;
-  {$IFEND}
 end;
 
 constructor TMediaCore_FFmpeg.Create();
@@ -209,12 +186,6 @@ begin
   inherited;
 
   CheckVersions();
-
-  {$IF LIBAVFORMAT_VERSION <= 52111000} // 52.110.0
-  av_register_protocol(@UTF8FileProtocol);
-  {$ELSEIF LIBAVFORMAT_VERSION < 54029104}
-  av_register_protocol2(@UTF8FileProtocol, sizeof(UTF8FileProtocol));
-  {$IFEND}
 
   AVCodecLock := SDL_CreateMutex();
 end;
@@ -245,21 +216,7 @@ end;
 
 function TMediaCore_FFmpeg.GetErrorString(ErrorNum: integer): string;
 begin
-{$IF LIBAVUTIL_VERSION < 50043000} // < 50.43.0
-  case ErrorNum of
-    AVERROR_IO:           Result := 'AVERROR_IO';
-    AVERROR_NUMEXPECTED:  Result := 'AVERROR_NUMEXPECTED';
-    AVERROR_INVALIDDATA:  Result := 'AVERROR_INVALIDDATA';
-    AVERROR_NOMEM:        Result := 'AVERROR_NOMEM';
-    AVERROR_NOFMT:        Result := 'AVERROR_NOFMT';
-    AVERROR_NOTSUPP:      Result := 'AVERROR_NOTSUPP';
-    AVERROR_NOENT:        Result := 'AVERROR_NOENT';
-    AVERROR_PATCHWELCOME: Result := 'AVERROR_PATCHWELCOME';
-    else                  Result := 'AVERROR_#'+inttostr(ErrorNum);
-  end;
-{$ELSE}
   Result := '';
-{$IFEND}
 end;
 
 {
@@ -279,26 +236,8 @@ begin
 
   for i := 0 to FormatCtx.nb_streams-1 do
   begin
-{$IF LIBAVFORMAT_VERSION <= 52111000} // <= 52.111.0
-    Stream := FormatCtx.streams[i];
-{$ELSE}
     Stream := PPAVStream(PtrUInt(FormatCtx.streams) + i * Sizeof(pointer))^;
-{$IFEND}
 
-{$IF LIBAVCODEC_VERSION < 52064000} // < 52.64.0
-    if (Stream.codec.codec_type = CODEC_TYPE_VIDEO) and
-       (FirstVideoStream < 0) then
-    begin
-      FirstVideoStream := i;
-    end;
-
-    if (Stream.codec.codec_type = CODEC_TYPE_AUDIO) and
-       (FirstAudioStream < 0) then
-    begin
-      FirstAudioStream := i;
-    end;
-  end;
-{$ELSE}
     if (Stream.codec.codec_type = AVMEDIA_TYPE_VIDEO) and
        (FirstVideoStream < 0) then
     begin
@@ -311,7 +250,6 @@ begin
       FirstAudioStream := i;
     end;
   end;
-{$IFEND}
 
   // return true if either an audio- or video-stream was found
   Result := (FirstAudioStream > -1) or
@@ -329,17 +267,9 @@ begin
 
   for i := 0 to FormatCtx^.nb_streams-1 do
   begin
-{$IF LIBAVFORMAT_VERSION <= 52111000} // <= 52.111.0
-    Stream := FormatCtx^.streams[i];
-{$ELSE}
     Stream := PPAVStream(PtrUInt(FormatCtx^.streams) + i * Sizeof(pointer))^;
-{$IFEND}
 
-{$IF LIBAVCODEC_VERSION < 52064000} // < 52.64.0
-    if (Stream.codec^.codec_type = CODEC_TYPE_AUDIO) then
-{$ELSE}
     if (Stream.codec^.codec_type = AVMEDIA_TYPE_AUDIO) then
-{$IFEND}
     begin
       StreamIndex := i;
       Break;
@@ -351,14 +281,14 @@ end;
 
 function TMediaCore_FFmpeg.ConvertFFmpegToAudioFormat(FFmpegFormat: TAVSampleFormat; out Format: TAudioSampleFormat): boolean;
 begin
-	Result := true;
-  case FFmpegFormat of
-    AV_SAMPLE_FMT_U8:  Format := asfU8;
-    AV_SAMPLE_FMT_S16: Format := asfS16;
-    AV_SAMPLE_FMT_S32: Format := asfS32;
-    AV_SAMPLE_FMT_FLT: Format := asfFloat;
-    AV_SAMPLE_FMT_DBL: Format := asfDouble;
-    else               Result := false;
+		Result := true;
+    case FFmpegFormat of
+      AV_SAMPLE_FMT_U8:  Format := asfU8;
+      AV_SAMPLE_FMT_S16: Format := asfS16;
+      AV_SAMPLE_FMT_S32: Format := asfS32;
+      AV_SAMPLE_FMT_FLT: Format := asfFloat;
+      AV_SAMPLE_FMT_DBL: Format := asfDouble;
+    else                 Result := false;
     end;
 end;
 
@@ -381,11 +311,7 @@ end;
  * http://www.mail-archive.com/libav-user@mplayerhq.hu/msg02460.html
  *}
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 function FFmpegStreamOpen(Out h: Pointer; filename: PAnsiChar; flags: Integer): Integer;
-{$ELSE}
-function FFmpegStreamOpen(h: PURLContext; filename: PAnsiChar; flags: cint): cint; cdecl;
-{$ENDIF}
 var
   Stream: TStream;
   Mode: word;
@@ -412,33 +338,17 @@ begin
 
   try
     Stream := TBinaryFileStream.Create(FilePath, Mode);
-    {$IF LIBAVFORMAT_VERSION >= 54029104}
     h := Stream;
-    {$ELSE}
-    h.priv_data := Stream;
-    {$ENDIF}
   except
-{$IF LIBAVUTIL_VERSION < 50043000} // < 50.43.0
-    Result := AVERROR_NOENT;
-{$ELSE}
     Result := -1;
-{$IFEND}
   end;
 end;
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 function FFmpegStreamRead(h: Pointer; buf: PByteArray; size: cint): cint; cdecl;
-{$ELSE}
-function FFmpegStreamRead(h: PURLContext; buf: PByteArray; size: cint): cint; cdecl;
-{$ENDIF}
 var
   Stream: TStream;
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   Stream := TStream(h);
-  {$ELSE}
-  Stream := TStream(h.priv_data);
-  {$ENDIF}
   if (Stream = nil) then
     raise EInvalidContainer.Create('FFmpegStreamRead on nil');
   try
@@ -448,19 +358,11 @@ begin
   end;
 end;
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 function FFmpegStreamWrite(h: Pointer; buf: PByteArray; size: cint): cint; cdecl;
-{$ELSE}
-function FFmpegStreamWrite(h: PURLContext; buf: PByteArray; size: cint): cint; cdecl;
-{$ENDIF}
 var
   Stream: TStream;
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   Stream := TStream(h);
-  {$ELSE}
-  Stream := TStream(h.priv_data);
-  {$ENDIF}
   if (Stream = nil) then
     raise EInvalidContainer.Create('FFmpegStreamWrite on nil');
   try
@@ -470,20 +372,12 @@ begin
   end;
 end;
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 function FFmpegStreamSeek(h: Pointer; pos: cint64; whence: cint): cint64; cdecl;
-{$ELSE}
-function FFmpegStreamSeek(h: PURLContext; pos: cint64; whence: cint): cint64; cdecl;
-{$ENDIF}
 var
   Stream : TStream;
   Origin : TSeekOrigin;
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   Stream := TStream(h);
-  {$ELSE}
-  Stream := TStream(h.priv_data);
-  {$ENDIF}
   if (Stream = nil) then
     raise EInvalidContainer.Create('FFmpegStreamSeek on nil');
   case whence of
@@ -500,19 +394,11 @@ begin
   Result := Stream.Seek(pos, Origin);
 end;
 
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 function FFmpegStreamClose(h: Pointer): Integer;
-{$ELSE}
-function FFmpegStreamClose(h: PURLContext): cint; cdecl;
-{$ENDIF}
 var
   Stream : TStream;
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   Stream := TStream(h);
-  {$ELSE}
-  Stream := TStream(h.priv_data);
-  {$ENDIF}
   try
     Stream.Free;
   except
@@ -522,32 +408,24 @@ begin
 end;
 
 function TMediaCore_FFmpeg.AVFormatOpenInput(ps: PPAVFormatContext; filename: {const} PAnsiChar): Integer;
-{$IF LIBAVFORMAT_VERSION >= 54029104}
 var
   h: Pointer;
   buffer: Pointer;
-{$ENDIF}
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   ps^ := avformat_alloc_context();
   buffer := av_malloc(BLOCKSIZE);
   FFmpegStreamOpen(h, filename, URL_RDONLY);
   ps^^.pb := avio_alloc_context(buffer, BLOCKSIZE, 0, h, FFmpegStreamRead, FFmpegStreamWrite, FFmpegStreamSeek);
   Result := avformat_open_input(ps, filename, nil, nil);
-  {$ELSE}
-  Result := 0;
-  {$ENDIF}
 end;
 
 procedure TMediaCore_FFmpeg.AVFormatCloseInput(ps: PPAVFormatContext);
 begin
-  {$IF LIBAVFORMAT_VERSION >= 54029104}
   av_free(ps^^.pb.buffer);
   FFmpegStreamClose(ps^^.pb.opaque);
   { avformat_close_input frees AVIOContext pb, no avio_close needed }
   { avformat_close_input frees AVFormatContext, no additional avformat_free_context needed }
   avformat_close_input(ps);
-  {$ENDIF}
 end;
 
 { TPacketQueue }

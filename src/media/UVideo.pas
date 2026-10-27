@@ -1,8 +1,8 @@
 {*
     UltraStar WorldParty - Karaoke Game
-	
-	UltraStar WorldParty is the legal property of its developers, 
-	whose names	are too numerous to list here. Please refer to the 
+
+	UltraStar WorldParty is the legal property of its developers,
+	whose names	are too numerous to list here. Please refer to the
 	COPYRIGHT file distributed with this source distribution.
 
     This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program. Check "LICENSE" file. If not, see 
+    along with this program. Check "LICENSE" file. If not, see
 	<http://www.gnu.org/licenses/>.
  *}
 unit UVideo;
@@ -210,35 +210,6 @@ var
   SupportsNPOT: Boolean;
 
 
-{$IF LIBAVCODEC_VERSION < 51068000}
-// These are called whenever we allocate a frame buffer.
-// We use this to store the global_pts in a frame at the time it is allocated.
-function PtsGetBuffer(CodecCtx: PAVCodecContext; Frame: PAVFrame): integer; cdecl;
-var
-  pts: Pint64;
-  VideoPktPts: Pint64;
-begin
-  Result := avcodec_default_get_buffer(CodecCtx, Frame);
-  VideoPktPts := CodecCtx^.opaque;
-  if (VideoPktPts <> nil) then
-  begin
-    // Note: we must copy the pts instead of passing a pointer, because the packet
-    // (and with it the pts) might change before a frame is returned by av_decode_video.
-    pts := av_malloc(sizeof(int64));
-    pts^ := VideoPktPts^;
-    Frame^.opaque := pts;
-  end;
-end;
-
-procedure PtsReleaseBuffer(CodecCtx: PAVCodecContext; Frame: PAVFrame); cdecl;
-begin
-  if (Frame <> nil) then
-    av_freep(@Frame^.opaque);
-  avcodec_default_release_buffer(CodecCtx, Frame);
-end;
-{$ENDIF}
-
-
 {*------------------------------------------------------------------------------
  * TVideoPlayback_ffmpeg
  *------------------------------------------------------------------------------}
@@ -305,13 +276,7 @@ begin
   fPboEnabled := PboSupported;
 
   // use custom 'ufile' protocol for UTF-8 support
-  {$IF LIBAVFORMAT_VERSION < 53001003}
-  errnum := av_open_input_file(fFormatContext, PAnsiChar('ufile:'+FileName.ToUTF8), nil, 0, nil);
-  {$ELSEIF LIBAVFORMAT_VERSION < 54029104}
-  errnum := avformat_open_input(@fFormatContext, PAnsiChar('ufile:'+FileName.ToUTF8), nil, nil);
-  {$ELSE}
   errnum := FFmpegCore.AVFormatOpenInput(@fFormatContext, PAnsiChar(UTF8ToAnsi(FileName.ToUTF8)));//'ufile:'+FileName.ToUTF8));
-  {$IFEND}
   if (errnum <> 0) then
   begin
     Log.LogError('Failed to open file "'+ FileName.ToNative +'" ('+FFmpegCore.GetErrorString(errnum)+'::'+IntToStr(errnum)+')');
@@ -319,11 +284,7 @@ begin
   end;
 
   // update video info
-  {$IF LIBAVFORMAT_VERSION >= 53002000)}
   errnum := avformat_find_stream_info(fFormatContext, nil);
-  {$ELSE}
-  errnum := av_find_stream_info(fFormatContext);
-  {$IFEND}
   if (errnum < 0) then
   begin
     Log.LogError('No stream info found', 'TVideoPlayback_ffmpeg.Open');
@@ -341,11 +302,7 @@ begin
     Exit;
   end;
 
-{$IF LIBAVFORMAT_VERSION <= 52111000} // <= 52.111.0
-  fStream := fFormatContext^.streams[fStreamIndex];
-{$ELSE}
   fStream := PPAVStream(PtrUInt(fFormatContext^.streams) + fStreamIndex * Sizeof(pointer))^;
-{$IFEND}
   fCodecContext := fStream^.codec;
 
   fPreferDTS := false;
@@ -377,11 +334,7 @@ begin
   // fail if called concurrently by different threads.
   FFmpegCore.LockAVCodec();
   try
-    {$IF LIBAVCODEC_VERSION >= 53005000)}
     errnum := avcodec_open2(fCodecContext, fCodec, nil);
-    {$ELSE}
-    errnum := avcodec_open(fCodecContext, fCodec);
-    {$IFEND}
   finally
     FFmpegCore.UnlockAVCodec();
   end;
@@ -391,12 +344,6 @@ begin
     Close();
     Exit;
   end;
-
-  // register custom callbacks for pts-determination
-  {$IF LIBAVCODEC_VERSION < 51068000}
-    fCodecContext^.get_buffer := PtsGetBuffer;
-    fCodecContext^.release_buffer := PtsReleaseBuffer;
-  {$IFEND}
 
   {$ifdef DebugDisplay}
   DebugWriteln('Found a matching Codec: '+ fCodecContext^.Codec.Name + sLineBreak +
@@ -410,13 +357,8 @@ begin
   {$endif}
 
   // allocate space for decoded frame and rgb frame
-  {$IF LIBAVCODEC_VERSION >= 57000000}
   fAVFrame := av_frame_alloc();
   fAVFrameRGB := av_frame_alloc();
-  {$ELSE}
-  fAVFrame := avcodec_alloc_frame();
-  fAVFrameRGB := avcodec_alloc_frame();
-  {$ENDIF}
   fFrameBuffer := av_malloc(avpicture_get_size(PIXEL_FMT_FFMPEG,
       (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height));
 
@@ -588,13 +530,7 @@ begin
   end;
 
   if (fFormatContext <> nil) then
-    {$IF LIBAVFORMAT_VERSION < 53024002)}
-    av_close_input_file(fFormatContext);
-    {$ELSEIF LIBAVFORMAT_VERSION < 54029104}
-    avformat_close_input(@fFormatContext);
-    {$ELSE}
     FFmpegCore.AVFormatCloseInput(@fFormatContext);
-    {$IFEND}
 
   fCodecContext  := nil;
   fFormatContext := nil;
@@ -631,9 +567,6 @@ end;
 function TVideo_FFmpeg.DecodeFrame(): boolean;
 var
   FrameFinished: Integer;
-  {$IF LIBAVCODEC_VERSION < 51068000}
-  VideoPktPts: int64;
-  {$ENDIF}
   pbIOCtx: PAVIOContext;
   errnum: integer;
   AVPacket: TAVPacket;
@@ -656,29 +589,17 @@ begin
     begin
       // failed to read a frame, check reason
 
-      {$IF (LIBAVFORMAT_VERSION_MAJOR >= 52)}
       pbIOCtx := fFormatContext^.pb;
-      {$ELSE}
-      pbIOCtx := @fFormatContext^.pb;
-      {$IFEND}
 
       // check for end-of-file (EOF is not an error)
-      {$IF (LIBAVFORMAT_VERSION_MAJOR < 56)}
-      if (url_feof(pbIOCtx) <> 0) then
-      {$ELSE}
       if (avio_feof(pbIOCtx) <> 0) then
-      {$IFEND}
       begin
         fEOF := true;
         Exit;
       end;
 
       // check for errors
-      {$IF (LIBAVFORMAT_VERSION >= 52103000)}
       urlError := pbIOCtx^.error;
-      {$ELSE}
-      urlError := url_ferror(pbIOCtx);
-      {$IFEND}
       if (urlError <> 0) then
       begin
         Log.LogError('Video decoding file error', 'TVideoPlayback_FFmpeg.DecodeFrame');
@@ -687,11 +608,7 @@ begin
 
       // url_feof() does not detect an EOF for some mov-files (e.g. deluxe.mov)
       // so we have to do it this way.
-      {$IF (LIBAVFORMAT_VERSION >= 53009000)}
       fileSize := avio_size(fFormatContext^.pb);
-      {$ELSE}
-      fileSize := fFormatContext^.file_size;
-      {$IFEND}
       if ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) then
       begin
         fEOF := true;
@@ -711,26 +628,9 @@ begin
     // if we got a packet from the video stream, then decode it
     if (AVPacket.stream_index = fStreamIndex) then
     begin
-      {$IF LIBAVCODEC_VERSION < 51068000}
-      // save pts to be stored in pFrame in first call of PtsGetBuffer()
-      VideoPktPts := AVPacket.pts;
-      fCodecContext^.opaque := @VideoPktPts;
-      {$ELSEIF LIBAVCODEC_VERSION < 51105000}
-      fCodecContext^.reordered_opaque := AVPacket.pts;
-      {$IFEND}
-
       // decode packet
-      {$IF LIBAVFORMAT_VERSION < 52012200)}
-      avcodec_decode_video(fCodecContext, fAVFrame,
-          frameFinished, AVPacket.data, AVPacket.size);
-      {$ELSE}
       avcodec_decode_video2(fCodecContext, fAVFrame,
           frameFinished, @AVPacket);
-      {$IFEND}
-
-      {$IF LIBAVCODEC_VERSION < 51106000}
-      dts := AVPacket.dts
-      {$IFEND}
     end;
 
     // free the packet from av_read_frame
@@ -738,22 +638,9 @@ begin
   end;
 
   // reset opaque data and update pts
-  {$IF LIBAVCODEC_VERSION < 51068000}
-  fCodecContext^.opaque := nil;
-  if fAVFrame^.opaque <> nil then
-    pts := Pint64(fAVFrame^.opaque)^
-  else
-    pts := AV_NOPTS_VALUE;
-  {$ELSEIF LIBAVCODEC_VERSION < 51105000}
-  fCodecContext^.reordered_opaque := AV_NOPTS_VALUE;
-  pts := fAVFrame^.reordered_opaque;
-  {$ELSE}
   pts := fAVFrame^.pkt_pts;
-  {$IFEND}
 
-  {$IF LIBAVCODEC_VERSION >= 51106000}
   dts := fAVFrame^.pkt_dts;
-  {$IFEND}
 
   if (pts = AV_NOPTS_VALUE) or (fPreferDTS and (dts <> AV_NOPTS_VALUE)) then
     pts := dts;
