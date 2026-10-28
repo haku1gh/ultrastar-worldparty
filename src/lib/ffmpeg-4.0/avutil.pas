@@ -279,6 +279,8 @@ function av_fourcc_make_string(buf: PAnsiChar; fourcc: cuint64): PAnsiChar;
 
 {$INCLUDE libavutil/frame.pas}
 
+{$INCLUDE libavutil/imgutils.pas}
+
 
 (* libavutil/common.h *) // until now MKTAG and MKBETAG is all from common.h KMS 19/5/2010
 

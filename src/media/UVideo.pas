@@ -303,17 +303,33 @@ begin
   end;
 
   fStream := PPAVStream(PtrUInt(fFormatContext^.streams) + fStreamIndex * Sizeof(pointer))^;
-  fCodecContext := fStream^.codec;
-
   fPreferDTS := false;
   // workaround for FFmpeg bug #6560
   if (LeftStr(fFormatContext^.iformat^.name, 4) = 'mov,') or (fFormatContext^.iformat^.name = 'mov') then
     fPreferDTS := true;
 
-  fCodec := avcodec_find_decoder(fCodecContext^.codec_id);
+  // AVStream.codec was removed in FFmpeg 5.0. Instead we create (and own) a
+  // codec context and initialize it with the stream's codec parameters.
+  fCodec := avcodec_find_decoder(fStream^.codecpar^.codec_id);
   if (fCodec = nil) then
   begin
     Log.LogError('No matching codec found', 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+
+  fCodecContext := avcodec_alloc_context3(fCodec);
+  if (fCodecContext = nil) then
+  begin
+    Log.LogError('Failed to allocate codec context', 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+
+  errnum := avcodec_parameters_to_context(fCodecContext, fStream^.codecpar);
+  if (errnum < 0) then
+  begin
+    Log.LogError('Failed to copy codec parameters: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
     Close();
     Exit;
   end;
@@ -359,8 +375,8 @@ begin
   // allocate space for decoded frame and rgb frame
   fAVFrame := av_frame_alloc();
   fAVFrameRGB := av_frame_alloc();
-  fFrameBuffer := av_malloc(avpicture_get_size(PIXEL_FMT_FFMPEG,
-      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height));
+  fFrameBuffer := av_malloc(av_image_get_buffer_size(PIXEL_FMT_FFMPEG,
+      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height, 1));
 
   if ((fAVFrame = nil) or (fAVFrameRGB = nil) or (fFrameBuffer = nil)) then
   begin
@@ -369,11 +385,12 @@ begin
     Exit;
   end;
 
-  errnum := avpicture_fill(PAVPicture(fAVFrameRGB), fFrameBuffer, PIXEL_FMT_FFMPEG,
-      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height);
+  errnum := av_image_fill_arrays(@fAVFrameRGB^.data[0], @fAVFrameRGB^.linesize[0],
+      fFrameBuffer, PIXEL_FMT_FFMPEG,
+      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height, 1);
   if (errnum < 0) then
   begin
-    Log.LogError('avpicture_fill failed: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
+    Log.LogError('av_image_fill_arrays failed: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
     Close();
     Exit;
   end;
@@ -387,7 +404,7 @@ begin
     fAspect := fAspect * fCodecContext^.width /
                          fCodecContext^.height;
 
-  r_frame_rate := av_q2d(av_stream_get_r_frame_rate(fStream));
+  r_frame_rate := av_q2d(fStream^.r_frame_rate);
 
   fFrameDuration := 1/r_frame_rate;
 
@@ -511,8 +528,9 @@ begin
     av_free(fFrameBuffer);
   if (fAVFrameRGB <> nil) then
     av_free(fAVFrameRGB);
+  // av_frame_free() also releases the buffers referenced by the decoded frame
   if (fAVFrame <> nil) then
-    av_free(fAVFrame);
+    av_frame_free(@fAVFrame);
 
   fAVFrame     := nil;
   fAVFrameRGB  := nil;
@@ -520,10 +538,11 @@ begin
 
   if (fCodecContext <> nil) then
   begin
-    // avcodec_close() is not thread-safe
+    // closing the codec is not thread-safe.
+    // As we own the context (see Open) it is closed and freed here.
     FFmpegCore.LockAVCodec();
     try
-      avcodec_close(fCodecContext);
+      avcodec_free_context(fCodecContext);
     finally
       FFmpegCore.UnlockAVCodec();
     end;
@@ -551,7 +570,9 @@ begin
     fFrameTime := pts;
   end;
   // update the video clock
-  FrameDelay := av_q2d(fCodecContext^.time_base);
+  // Note: the codec context's time_base is not set for contexts created from
+  // codec parameters, so we use the frame duration determined in Open().
+  FrameDelay := fFrameDuration;
   // if we are repeating a frame, adjust clock accordingly
   FrameDelay := FrameDelay + Frame^.repeat_pict * (FrameDelay * 0.5);
   fFrameTime := fFrameTime + FrameDelay;
@@ -566,79 +587,99 @@ end;
  *}
 function TVideo_FFmpeg.DecodeFrame(): boolean;
 var
-  FrameFinished: Integer;
+  FrameFinished: boolean;
   pbIOCtx: PAVIOContext;
   errnum: integer;
-  AVPacket: TAVPacket;
+  Packet: PAVPacket;
   pts: int64;
   dts: int64;
   fileSize: int64;
   urlError: integer;
 begin
   Result := false;
-  FrameFinished := 0;
 
   if fEOF then
     Exit;
 
-  // read packets until we have a finished frame (or there are no more packets)
-  while (FrameFinished = 0) do
+  Packet := av_packet_alloc();
+  if (Packet = nil) then
   begin
-    errnum := av_read_frame(fFormatContext, AVPacket);
-    if (errnum < 0) then
-    begin
-      // failed to read a frame, check reason
-
-      pbIOCtx := fFormatContext^.pb;
-
-      // check for end-of-file (EOF is not an error)
-      if (avio_feof(pbIOCtx) <> 0) then
-      begin
-        fEOF := true;
-        Exit;
-      end;
-
-      // check for errors
-      urlError := pbIOCtx^.error;
-      if (urlError <> 0) then
-      begin
-        Log.LogError('Video decoding file error', 'TVideoPlayback_FFmpeg.DecodeFrame');
-        Exit;
-      end;
-
-      // url_feof() does not detect an EOF for some mov-files (e.g. deluxe.mov)
-      // so we have to do it this way.
-      fileSize := avio_size(fFormatContext^.pb);
-      if ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) then
-      begin
-        fEOF := true;
-        Exit;
-      end;
-      if (errnum = -541478725) then // LIBAVFORMAT_VERSION >= 56000000 tells us if EOF reached.
-      begin
-        fEOF := true;
-        Exit
-      end;
-
-      // error occured, log and exit
-      Log.LogError('Video decoding error: ' + IntToStr(errnum), 'TVideoPlayback_FFmpeg.DecodeFrame');
-      Exit;
-    end;
-
-    // if we got a packet from the video stream, then decode it
-    if (AVPacket.stream_index = fStreamIndex) then
-    begin
-      // decode packet
-      avcodec_decode_video2(fCodecContext, fAVFrame,
-          frameFinished, @AVPacket);
-    end;
-
-    // free the packet from av_read_frame
-    av_packet_unref( @AVPacket );
+    Log.LogError('Failed to allocate packet', 'TVideoPlayback_FFmpeg.DecodeFrame');
+    Exit;
   end;
 
-  // reset opaque data and update pts
-  pts := fAVFrame^.pkt_pts;
+  try
+    // read packets until we have a finished frame (or there are no more packets)
+    FrameFinished := false;
+    while (not FrameFinished) do
+    begin
+      // check if the decoder already has a finished frame for us.
+      // Note: decoders may buffer several frames, so we have to ask for
+      // output before we feed new input.
+      errnum := avcodec_receive_frame(fCodecContext, fAVFrame);
+      if (errnum = 0) then
+      begin
+        FrameFinished := true;
+        Continue;
+      end;
+
+      // the decoder needs more input (EAGAIN).
+      // Other decoding errors are ignored like before, we just read on.
+      errnum := av_read_frame(fFormatContext, Packet^);
+      if (errnum < 0) then
+      begin
+        // failed to read a frame, check reason
+
+        pbIOCtx := fFormatContext^.pb;
+
+        // check for end-of-file (EOF is not an error)
+        if (avio_feof(pbIOCtx) <> 0) then
+        begin
+          fEOF := true;
+          Exit;
+        end;
+
+        // check for errors
+        urlError := pbIOCtx^.error;
+        if (urlError <> 0) then
+        begin
+          Log.LogError('Video decoding file error', 'TVideoPlayback_FFmpeg.DecodeFrame');
+          Exit;
+        end;
+
+        // url_feof() does not detect an EOF for some mov-files (e.g. deluxe.mov)
+        // so we have to do it this way.
+        fileSize := avio_size(fFormatContext^.pb);
+        if ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) then
+        begin
+          fEOF := true;
+          Exit;
+        end;
+        if (errnum = AVERROR_EOF) then // newer libavformat versions tell us if EOF was reached
+        begin
+          fEOF := true;
+          Exit
+        end;
+
+        // error occured, log and exit
+        Log.LogError('Video decoding error: ' + IntToStr(errnum), 'TVideoPlayback_FFmpeg.DecodeFrame');
+        Exit;
+      end;
+
+      // if we got a packet from the video stream, then send it to the decoder
+      if (Packet^.stream_index = fStreamIndex) then
+        avcodec_send_packet(fCodecContext, Packet);
+
+      // free the packet from av_read_frame
+      av_packet_unref(Packet);
+    end;
+  finally
+    av_packet_free(@Packet);
+  end;
+
+  // update pts (AVFrame.pkt_pts was removed in FFmpeg 5.0, AVFrame.pts
+  // contains the same value)
+  pts := fAVFrame^.pts;
 
   dts := fAVFrame^.pkt_dts;
 

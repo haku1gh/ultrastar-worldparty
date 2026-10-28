@@ -44,11 +44,19 @@ uses
   UPath;
 
 type
+  { Own list entry type, as AVPacketList is deprecated since FFmpeg 4.4 and
+    removed in newer versions. }
+  PPacketListEntry = ^TPacketListEntry;
+  TPacketListEntry = record
+    pkt:  TAVPacket;
+    next: PPacketListEntry;
+  end;
+
   PPacketQueue = ^TPacketQueue;
   TPacketQueue = class
     private
-      FirstListEntry: PAVPacketList;
-      LastListEntry:  PAVPacketList;
+      FirstListEntry: PPacketListEntry;
+      LastListEntry:  PPacketListEntry;
       PacketCount: integer;
       Mutex:     PSDL_Mutex;
       Condition: PSDL_Cond;
@@ -238,13 +246,13 @@ begin
   begin
     Stream := PPAVStream(PtrUInt(FormatCtx.streams) + i * Sizeof(pointer))^;
 
-    if (Stream.codec.codec_type = AVMEDIA_TYPE_VIDEO) and
+    if (Stream^.codecpar^.codec_type = AVMEDIA_TYPE_VIDEO) and
        (FirstVideoStream < 0) then
     begin
       FirstVideoStream := i;
     end;
 
-    if (Stream.codec.codec_type = AVMEDIA_TYPE_AUDIO) and
+    if (Stream^.codecpar^.codec_type = AVMEDIA_TYPE_AUDIO) and
        (FirstAudioStream < 0) then
     begin
       FirstAudioStream := i;
@@ -269,7 +277,7 @@ begin
   begin
     Stream := PPAVStream(PtrUInt(FormatCtx^.streams) + i * Sizeof(pointer))^;
 
-    if (Stream.codec^.codec_type = AVMEDIA_TYPE_AUDIO) then
+    if (Stream^.codecpar^.codec_type = AVMEDIA_TYPE_AUDIO) then
     begin
       StreamIndex := i;
       Break;
@@ -469,26 +477,44 @@ begin
   SDL_UnlockMutex(Mutex);
 end;
 
+(**
+ * Adds a packet to the end of the queue.
+ * Put() takes over the packet: for regular packets the queue keeps its own
+ * reference and the caller's reference is released (like av_dup_packet() did
+ * before), so the caller must not use or free the packet afterwards.
+ * Status packets are copied as they are.
+ *)
 function TPacketQueue.Put(Packet : PAVPacket): integer;
 var
-  CurrentListEntry : PAVPacketList;
+  CurrentListEntry : PPacketListEntry;
+  RefResult: integer;
 begin
   Result := -1;
 
   if (Packet = nil) then
     Exit;
 
-  if (PChar(Packet^.data) <> STATUS_PACKET) then
-  begin
-    if (av_dup_packet(Packet) < 0) then
-      Exit;
-  end;
-
-  CurrentListEntry := av_malloc(SizeOf(TAVPacketList));
+  CurrentListEntry := av_malloc(SizeOf(TPacketListEntry));
   if (CurrentListEntry = nil) then
     Exit;
+  FillChar(CurrentListEntry^, SizeOf(TPacketListEntry), 0);
 
-  CurrentListEntry^.pkt  := Packet^;
+  if (PChar(Packet^.data) <> STATUS_PACKET) then
+  begin
+    // the queue gets its own reference, so the data does not depend on
+    // the demuxer's internal buffers
+    RefResult := av_packet_ref(@CurrentListEntry^.pkt, Packet);
+    // release the caller's reference
+    av_packet_unref(Packet);
+    if (RefResult < 0) then
+    begin
+      av_free(CurrentListEntry);
+      Exit;
+    end;
+  end
+  else
+    CurrentListEntry^.pkt := Packet^;
+
   CurrentListEntry^.next := nil;
 
   SDL_LockMutex(Mutex);
@@ -522,21 +548,20 @@ function TPacketQueue.PutStatus(StatusFlag: integer; StatusInfo: Pointer): integ
 var
   TempPacket: PAVPacket;
 begin
-  // create temp. package
-  TempPacket := av_malloc(SizeOf(TAVPacket));
+  // create temp. package (allocated and initialized with default values)
+  TempPacket := av_packet_alloc();
   if (TempPacket = nil) then
   begin
     Result := -1;
     Exit;
   end;
-  // init package
-  av_init_packet(TempPacket^);
   TempPacket^.data  := Pointer(STATUS_PACKET);
   TempPacket^.flags := StatusFlag;
   // put a copy of the package into the queue
   Result := Put(TempPacket);
   // data has been copied -> delete temp. package
-  av_free(TempPacket);
+  // (the status marker is no allocated data, av_packet_free() does not touch it)
+  av_packet_free(@TempPacket);
 end;
 
 procedure TPacketQueue.FreeStatusInfo(var Packet: TAVPacket);
@@ -550,7 +575,7 @@ end;
 
 function TPacketQueue.Get(var Packet: TAVPacket; Blocking: boolean): integer;
 var
-  CurrentListEntry: PAVPacketList;
+  CurrentListEntry: PPacketListEntry;
 const
   WAIT_TIMEOUT = 10; // timeout in ms
 begin
@@ -608,7 +633,7 @@ end;
 
 procedure TPacketQueue.Flush();
 var
-  CurrentListEntry, TempListEntry: PAVPacketList;
+  CurrentListEntry, TempListEntry: PPacketListEntry;
 begin
   SDL_LockMutex(Mutex);
 
