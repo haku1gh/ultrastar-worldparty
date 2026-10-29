@@ -339,20 +339,36 @@ begin
 
   fAudioStream := PPAVStream(PtrUInt(fFormatCtx.streams) + fAudioStreamIndex * Sizeof(pointer))^;
   fAudioStreamPos := 0;
-  fCodecCtx := fAudioStream^.codec;
+
+  fCodec := avcodec_find_decoder(fAudioStream^.codecpar^.codec_id);
+  if (fCodec = nil) then
+  begin
+    Log.LogError('Unsupported codec!', 'UAudio_FFmpeg');
+    Close();
+    Exit;
+  end;
+
+  // AVStream.codec was removed in FFmpeg 5.0. Instead we create (and own) a
+  // codec context and initialize it with the stream's codec parameters.
+  fCodecCtx := avcodec_alloc_context3(fCodec);
+  if (fCodecCtx = nil) then
+  begin
+    Log.LogError('Failed to allocate codec context!', 'UAudio_FFmpeg');
+    Close();
+    Exit;
+  end;
+
+  AVResult := avcodec_parameters_to_context(fCodecCtx, fAudioStream^.codecpar);
+  if (AVResult < 0) then
+  begin
+    Log.LogError('Failed to copy codec parameters!', 'UAudio_FFmpeg');
+    Close();
+    Exit;
+  end;
 
   // TODO: should we use this or not? Should we allow 5.1 channel audio?
 
   fCodecCtx^.request_channel_layout := ($20000000 or $40000000); //avcodec.c AV_CH_LAYOUT_STEREO_DOWNMIX;
-
-  fCodec := avcodec_find_decoder(fCodecCtx^.codec_id);
-  if (fCodec = nil) then
-  begin
-    Log.LogError('Unsupported codec!', 'UAudio_FFmpeg');
-    fCodecCtx := nil;
-    Close();
-    Exit;
-  end;
 
   // set debug options
   fCodecCtx^.debug_mv := 0;
@@ -467,10 +483,11 @@ begin
   // Close the codec
   if (fCodecCtx <> nil) then
   begin
-    // avcodec_close() is not thread-safe
+    // closing the codec is not thread-safe.
+    // As we own the context (see Open) it is closed and freed here.
     FFmpegCore.LockAVCodec();
     try
-      avcodec_close(fCodecCtx);
+      avcodec_free_context(fCodecCtx);
     finally
       FFmpegCore.UnlockAVCodec();
     end;
@@ -917,25 +934,11 @@ end;
 
 procedure TFFmpegDecodeStream.FlushCodecBuffers();
 begin
-  // if no flush operation is specified, avcodec_flush_buffers will not do anything.
-  if (@fCodecCtx.codec.flush <> nil) then
-  begin
-    // flush buffers used by avcodec_decode_audio, etc.
-    avcodec_flush_buffers(fCodecCtx);
-  end
-  else
-  begin
-    // we need a Workaround to avoid plopping noise with ogg-vorbis and
-    // mp3 (in older versions of FFmpeg).
-    // We will just reopen the codec.
-    FFmpegCore.LockAVCodec();
-    try
-      avcodec_close(fCodecCtx);
-      avcodec_open2(fCodecCtx, fCodec, nil);
-    finally
-      FFmpegCore.UnlockAVCodec();
-    end;
-  end;
+  // flush the decoder's internal buffers and reset its state.
+  // (The former workaround of reopening the codec for decoders without a
+  // flush function is not needed anymore, and the codec's internal flush
+  // callback is not accessible in newer FFmpeg versions.)
+  avcodec_flush_buffers(fCodecCtx);
 end;
 
 function TFFmpegDecodeStream.DecodeFrame(): integer;
