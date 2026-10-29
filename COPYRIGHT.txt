@@ -1,10 +1,11 @@
 ﻿UltraStar WorldParty
-Copyright (C) 2010-2021 by the following:
+Copyright (C) 2010-2026 by the following:
 
 "Zup3r_vock"
 "Daniel20"
 "jmfb"
 "TeLiXj"
+"haku1gh"
 
 
 Translations:
