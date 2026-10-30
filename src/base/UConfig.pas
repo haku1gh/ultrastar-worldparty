@@ -127,7 +127,7 @@ const
    USWP_VERSION_MAJOR   = 21;
    USWP_VERSION_MINOR   = 2;
    USWP_VERSION_RELEASE = '';
-   USWP_VERSION_STATE   = '';
+   USWP_VERSION_STATE   = 'FFmpeg5 Edition';
    USWP_STRING = 'UltraStar WorldParty';
 
   (*
