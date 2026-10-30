@@ -25,11 +25,29 @@ Step 1:
 
 Step 2:
 ===============================================================================
-- OPEN: Retrieve latest FFmpeg 5.x libraries and C-headers.
+- DONE: Retrieve latest FFmpeg 5.x libraries and C-headers.
+  - Downloaded windows build 5.1.10 from https://system233.github.io/ffmpeg-msvc-prebuilt/en/releases.html
+  - Identify required and potential useful headers for UltraStar
+- DONE: Create the new library folder ffmpeg-5.1
+  - Copy files from ffmpeg-4.0 over to ffmpeg-5.1
+  - Add API definitions for channel layout
+  - Remove deprecated parts
+  - Updated version fields
+  - Records TAVCodecContext, TAVPacket, TAVCodecParameters, TAVCodec, TAVStream,
+    TAVFormatContext, TAVIOContext and TAVFrame rebuild from the C structs
+- DONE: Updated UAudioDecoder_FFmpeg.pas where 2 changes became unnecessary
+- DONE: Updated config files (config-win.inc and configure-ac) to point to the
+    new ffmpeg-5.1 folder
+- DONE: Replaced FFmpeg DLLs in the game folder
+
+Step 3:
+===============================================================================
+- OPEN:
+
 
 Open Topics for later
 ===============================================================================
-Things that came up while improving the FFmpeg libs.
+Things that came up while improving the FFmpeg libraries.
 
 - OPEN: There are >= 30 warnings in the code. Check each warning and correct
   if possible.
