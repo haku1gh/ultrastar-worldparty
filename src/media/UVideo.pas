@@ -87,6 +87,7 @@ type
     fOpened: boolean;     //**< stream successfully opened
     fPaused: boolean;     //**< stream paused
     fEOF: boolean;        //**< end-of-file state
+    fDraining: boolean;   //**< end of file reached, decoder is flushed and delivers its remaining frames
 
     fLoop: boolean;       //**< looping enabled
 
@@ -368,8 +369,8 @@ begin
     ', Height='+inttostr(fCodecContext^.height) + sLineBreak +
     '  Aspect    : '+inttostr(fCodecContext^.sample_aspect_ratio.num) + '/' +
                      inttostr(fCodecContext^.sample_aspect_ratio.den) + sLineBreak +
-    '  Framerate : '+inttostr(fCodecContext^.time_base.num) + '/' +
-                     inttostr(fCodecContext^.time_base.den));
+    '  Framerate : '+inttostr(fStream^.r_frame_rate.num) + '/' +
+                     inttostr(fStream^.r_frame_rate.den));
   {$endif}
 
   // allocate space for decoded frame and rgb frame
@@ -497,6 +498,7 @@ begin
   fFrameTexValid := false;
 
   fEOF := false;
+  fDraining := false;
 
   fLoop := false;
   fLoopTime := 0;
@@ -588,6 +590,7 @@ end;
 function TVideo_FFmpeg.DecodeFrame(): boolean;
 var
   FrameFinished: boolean;
+  EOFReached: boolean;
   pbIOCtx: PAVIOContext;
   errnum: integer;
   Packet: PAVPacket;
@@ -623,6 +626,14 @@ begin
         Continue;
       end;
 
+      if (fDraining) then
+      begin
+        // the decoder was flushed and has delivered all its frames
+        // (the error is AVERROR_EOF)
+        fEOF := true;
+        Exit;
+      end;
+
       // the decoder needs more input (EAGAIN).
       // Other decoding errors are ignored like before, we just read on.
       errnum := av_read_frame(fFormatContext, Packet^);
@@ -633,37 +644,39 @@ begin
         pbIOCtx := fFormatContext^.pb;
 
         // check for end-of-file (EOF is not an error)
-        if (avio_feof(pbIOCtx) <> 0) then
+        EOFReached := (avio_feof(pbIOCtx) <> 0);
+
+        if (not EOFReached) then
         begin
-          fEOF := true;
+          // check for errors
+          urlError := pbIOCtx^.error;
+          if (urlError <> 0) then
+          begin
+            Log.LogError('Video decoding file error', 'TVideoPlayback_FFmpeg.DecodeFrame');
+            Exit;
+          end;
+
+          // url_feof() does not detect an EOF for some mov-files (e.g. deluxe.mov)
+          // so we have to do it this way.
+          fileSize := avio_size(fFormatContext^.pb);
+          EOFReached := ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) or
+                        (errnum = AVERROR_EOF); // newer libavformat versions tell us if EOF was reached
+        end;
+
+        if (not EOFReached) then
+        begin
+          // error occured, log and exit
+          Log.LogError('Video decoding error: ' + IntToStr(errnum), 'TVideoPlayback_FFmpeg.DecodeFrame');
           Exit;
         end;
 
-        // check for errors
-        urlError := pbIOCtx^.error;
-        if (urlError <> 0) then
-        begin
-          Log.LogError('Video decoding file error', 'TVideoPlayback_FFmpeg.DecodeFrame');
-          Exit;
-        end;
-
-        // url_feof() does not detect an EOF for some mov-files (e.g. deluxe.mov)
-        // so we have to do it this way.
-        fileSize := avio_size(fFormatContext^.pb);
-        if ((fileSize <> 0) and (pbIOCtx^.pos >= fileSize)) then
-        begin
-          fEOF := true;
-          Exit;
-        end;
-        if (errnum = AVERROR_EOF) then // newer libavformat versions tell us if EOF was reached
-        begin
-          fEOF := true;
-          Exit
-        end;
-
-        // error occured, log and exit
-        Log.LogError('Video decoding error: ' + IntToStr(errnum), 'TVideoPlayback_FFmpeg.DecodeFrame');
-        Exit;
+        // End of file: send a NULL packet to flush the decoder. Decoders with
+        // delay (e.g. with B-frames) still hold frames that would be lost
+        // otherwise. They are fetched with avcodec_receive_frame() above
+        // until the decoder reports the end (see fDraining).
+        avcodec_send_packet(fCodecContext, nil);
+        fDraining := true;
+        Continue;
       end;
 
       // if we got a packet from the video stream, then send it to the decoder
@@ -1285,6 +1298,7 @@ begin
 
   fFrameTime := Time;
   fEOF := false;
+  fDraining := false;
   fFrameTexValid := false;
 
   if (av_seek_frame(fFormatContext,

@@ -130,7 +130,7 @@ type
       fDecoderResumeCond:        PSDL_Cond;
 
       // state-vars for DecodeFrame (locked by DecoderLock)
-      fAudioPaket:        TAVPacket;
+      fAudioPaket:        PAVPacket;
       fAudioPaketData:    PByteArray;
       fAudioPaketSize:    integer;
       fAudioPaketSilence: integer; // number of bytes of silence to return
@@ -138,7 +138,8 @@ type
       // state-vars for AudioCallback (locked by DecoderLock)
       fAudioBufferPos:  integer;
       fAudioBufferSize: integer;
-      fAudioBuffer:     PByteArray;
+      fAudioBuffer:     PByteArray; // not owned: points to the data of fAudioBufferFrame or to fSilenceBuffer
+      fSilenceBuffer:   PByteArray; // owned, always filled with zeros
       fAudioBufferFrame: PAVFrame;
 
       fFilename: IPath;
@@ -212,22 +213,23 @@ begin
   fDecoderUnlockedCond := SDL_CreateCond();
   fDecoderResumeCond := SDL_CreateCond();
   fAudioBufferFrame := av_frame_alloc();
-  // according to the documentation of avcodec_decode_audio(2), sample-data
-  // should be aligned on a 16 byte boundary. Otherwise internal calls
-  // (e.g. to SSE or Altivec operations) might fail or lack performance on some
-  // CPUs. Although GetMem() in Delphi and FPC seems to use a 16 byte or higher
-  // alignment for buffers of this size (alignment depends on the size of the
-  // requested buffer), we will set the alignment explicitly as the minimum
-  // alignment used by Delphi and FPC is on an 8 byte boundary.
+  // fAudioBuffer points to the data that is returned by the next call of
+  // ReadData(). The buffer is not owned: normally it points to the data of the
+  // decoded frame (fAudioBufferFrame), for generated silence it points to
+  // fSilenceBuffer. Previously a separate buffer was allocated here that was
+  // never freed and replaced by the frame's data pointer later.
   //
-  // Note: AudioBuffer was previously defined as a field of type TAudioBuffer
-  // (array[0..AUDIO_BUFFER_SIZE-1] of byte) and hence statically allocated.
-  // Fields of records are aligned different to memory allocated with GetMem(),
-  // aligning depending on the type but will be at least 2 bytes.
-  // AudioBuffer was not aligned to a 16 byte boundary. The {$ALIGN x} directive
-  // was not applicable as Delphi in contrast to FPC provides at most 8 byte
-  // alignment ({$ALIGN 16} is not supported) by this directive.
-  fAudioBuffer := GetAlignedMem(AUDIO_BUFFER_SIZE, 16);
+  // The silence buffer is allocated with av_malloc() which returns memory that
+  // is aligned to at least 16 bytes (sample-data should be aligned on a 16
+  // byte boundary, otherwise SSE or Altivec operations might fail or lack
+  // performance on some CPUs).
+  fAudioBuffer := nil;
+  fSilenceBuffer := av_malloc(AUDIO_BUFFER_SIZE);
+  FillChar(fSilenceBuffer^, AUDIO_BUFFER_SIZE, 0);
+
+  // The packet is allocated by libavcodec so we do not depend on the size of
+  // the C struct AVPacket.
+  fAudioPaket := av_packet_alloc();
 
   Reset();
 end;
@@ -245,6 +247,7 @@ begin
   fAudioPaketSize := 0;
   fAudioPaketSilence := 0;
 
+  fAudioBuffer := nil;
   fAudioBufferPos := 0;
   fAudioBufferSize := 0;
 
@@ -253,7 +256,8 @@ begin
   fDecoderLocked := false;
   fDecoderPauseRequestCount := 0;
 
-  FillChar(fAudioPaket, SizeOf(TAVPacket), 0);
+  if (fAudioPaket <> nil) then
+    av_packet_unref(fAudioPaket);
 end;
 
 {*
@@ -272,6 +276,8 @@ begin
   SDL_DestroyCond(fDecoderUnlockedCond);
   SDL_DestroyCond(fDecoderResumeCond);
   av_frame_free(@fAudioBufferFrame);
+  av_packet_free(@fAudioPaket);
+  av_freep(@fSilenceBuffer);
   inherited;
 end;
 
@@ -719,7 +725,7 @@ end;
  *)
 function TFFmpegDecodeStream.ParseLoop(): boolean;
 var
-  Packet: TAVPacket;
+  Packet: PAVPacket;
   SeekTarget: int64;
   ByteIOCtx: PAVIOContext;
   ErrorCode: integer;
@@ -751,6 +757,13 @@ var
 
 begin
   Result := true;
+
+  Packet := av_packet_alloc();
+  if (Packet = nil) then
+  begin
+    Result := false;
+    Exit;
+  end;
 
   while LockParser() do
   begin
@@ -786,7 +799,7 @@ begin
           begin
             // seeking failed
             fErrorState := true;
-            Log.LogError('Seek Error in "'+fFormatCtx^.filename+'"', 'UAudioDecoder_FFmpeg');
+            Log.LogError('Seek Error in "'+fFormatCtx^.url+'"', 'UAudioDecoder_FFmpeg');
           end
           else
           begin
@@ -836,7 +849,7 @@ begin
         Continue;
       end;
 
-      if (av_read_frame(fFormatCtx, Packet) < 0) then
+      if (av_read_frame(fFormatCtx, Packet^) < 0) then
       begin
         // failed to read a frame, check reason
         ByteIOCtx := fFormatCtx^.pb;
@@ -884,16 +897,17 @@ begin
         Break;
       end;
 
-      if (Packet.stream_index = fAudioStreamIndex) then
-        fPacketQueue.Put(@Packet)
+      if (Packet^.stream_index = fAudioStreamIndex) then
+        fPacketQueue.Put(Packet)
       else
-        av_packet_unref(@Packet);
+        av_packet_unref(Packet);
 
     finally
       SDL_LockMutex(fStateLock);
       UnlockParser();
     end;
   end;
+  av_packet_free(@Packet);
   if (IsQuit()) then
   begin
     Result := false;
@@ -965,7 +979,8 @@ begin
     if (fAudioPaketSilence > 0) then
     begin
       DataSize := Min(fAudioPaketSilence, AUDIO_BUFFER_SIZE);
-      FillChar(fAudioBuffer[0], DataSize, 0);
+      // fSilenceBuffer is always filled with zeros
+      fAudioBuffer := fSilenceBuffer;
       Dec(fAudioPaketSilence, DataSize);
       fAudioStreamPos := fAudioStreamPos + DataSize / fFormatInfo.BytesPerSec;
       Result := DataSize;
@@ -1017,8 +1032,7 @@ begin
     end;
 
     // free old packet data
-    if (fAudioPaket.data <> nil) then
-      av_packet_unref(@fAudioPaket);
+    av_packet_unref(fAudioPaket);
 
     // do not block queue on seeking (to avoid deadlocks on the DecoderLock)
     if (IsSeeking()) then
@@ -1032,13 +1046,13 @@ begin
       Exit;
 
     // handle Status-packet
-    if (PAnsiChar(fAudioPaket.data) = STATUS_PACKET) then
+    if (PAnsiChar(fAudioPaket^.data) = STATUS_PACKET) then
     begin
-      fAudioPaket.data := nil;
+      fAudioPaket^.data := nil;
       fAudioPaketData := nil;
       fAudioPaketSize := 0;
 
-      case (fAudioPaket.flags) of
+      case (fAudioPaket^.flags) of
         PKT_STATUS_FLAG_FLUSH:
         begin
           // just used if SetPositionIntern was called without the flush flag.
@@ -1073,18 +1087,18 @@ begin
       Continue;
     end;
 
-    fAudioPaketData := fAudioPaket.data;
-    fAudioPaketSize := fAudioPaket.size;
+    fAudioPaketData := fAudioPaket^.data;
+    fAudioPaketSize := fAudioPaket^.size;
 
-    avcodec_send_packet(fCodecCtx, @fAudioPaket);
+    avcodec_send_packet(fCodecCtx, fAudioPaket);
 
     // if available, update the stream position to the presentation time of this package
-    if(fAudioPaket.pts <> AV_NOPTS_VALUE) then
+    if(fAudioPaket^.pts <> AV_NOPTS_VALUE) then
     begin
       {$IFDEF DebugFFmpegDecode}
       TmpPos := fAudioStreamPos;
       {$ENDIF}
-      fAudioStreamPos := av_q2d(fAudioStream^.time_base) * fAudioPaket.pts;
+      fAudioStreamPos := av_q2d(fAudioStream^.time_base) * fAudioPaket^.pts;
       {$IFDEF DebugFFmpegDecode}
       DebugWriteln('Timestamp: ' + floattostrf(fAudioStreamPos, ffFixed, 15, 3) + ' ' +
                    '(Calc: ' + floattostrf(TmpPos, ffFixed, 15, 3) + '), ' +

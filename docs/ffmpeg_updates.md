@@ -45,7 +45,23 @@ Step 3: Fix encountered smaller issues
   declared. This was checked with the original header files and indeed a double
   pointer is required instead of a single pointer. This function hasn't been
   used so far.
+- DONE: Added the swresample DLL in the file check.
+- DONE: Changed the function "CheckVersions" to check on only the major release
+  version. A check of the major release is enough as everything below is ABI
+  compatible.
+- DONE: Fixed small memory leak in AVFormatCloseInput. AVIOContext was not
+  freed.
+- DONE: Remove creation of own TAVPackets.
+- DONE: The decoder is now emptied at the end of the video.
+- DONE: fAudioBuffer is being created with GetAlignedMem but never released.
+  Now its not even allocating a buffer and is using the frame data directly.
+  For silence a new buffer, fSilenceBuffer, is created.
+- DONE: Fixed bug that the game would freeze at the end of certain songs (can
+  be reproduced with AVI files and MPEG video streams).
 
+Step 4: Upgrade to FFmpeg 7.1 Libraries
+===============================================================================
+- OPEN: Retrieve latest FFmpeg 7.x libraries and C-headers.
 
 Open Topics for later
 ===============================================================================
@@ -53,18 +69,7 @@ Things that came up while improving the FFmpeg libraries.
 
 - OPEN: There are >= 30 warnings in the code. Check each warning and correct
   if possible.
-- OPEN: There is a function called "CheckVersions" which compares the header
-  and DLL version down to the release number. This prevents even small updates
-  within the same major release. Which is unnecessary. A check of the major
-  release is enough as everything below is ABI compatible. Furthermore a check
-  for the swresample DLL is missing.
-- OPEN: Check AVFormatCloseInput. Comment is maybe wrong. AVIOContext are not
-  freeing avformat_close_input. There could be a small memory leak.
-- OPEN: Handle TAVPacket differently in the future. This struct will need
-  additional field in newer version. E.g. time_base is added in FFmpeg 5.
-  Could lead to crashes.
-- OPEN: The decoder is not emptied at the end of the video. It seens to not
-  cause an issue, but there should be some frames lost. Check if this is ok.
-- OPEN: fAudioBuffer is being created with GetAlignedMem but never release.
-  Plus the pointer to DecodeFrame is rewired to frame.data[0]. This is a small
-  memory leak.
+- OPEN: When BASS is deactivated and therefore FFmpeg for audio is used, then
+  songs will not end. The remaining time counter will just continue with
+  negative numbers. This issue might not be related to the FFmpeg updates! As
+  a workaround: just press ESC at the end of the song.

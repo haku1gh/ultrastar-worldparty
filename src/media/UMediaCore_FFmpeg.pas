@@ -39,6 +39,7 @@ uses
   avutil,
   avio,
   swscale,
+  swresample,
   UMusic,
   ULog,
   UPath;
@@ -48,7 +49,8 @@ type
     removed in newer versions. }
   PPacketListEntry = ^TPacketListEntry;
   TPacketListEntry = record
-    pkt:  TAVPacket;
+    pkt:  PAVPacket;  // allocated with av_packet_alloc(), so the code does not
+                      // depend on the size of the C struct AVPacket
     next: PPacketListEntry;
   end;
 
@@ -68,9 +70,9 @@ type
 
       function Put(Packet : PAVPacket): integer;
       function PutStatus(StatusFlag: integer; StatusInfo: Pointer): integer;
-      procedure FreeStatusInfo(var Packet: TAVPacket);
-      function GetStatusInfo(var Packet: TAVPacket): Pointer;
-      function Get(var Packet: TAVPacket; Blocking: boolean): integer;
+      procedure FreeStatusInfo(Packet: PAVPacket);
+      function GetStatusInfo(Packet: PAVPacket): Pointer;
+      function Get(Packet: PAVPacket; Blocking: boolean): integer;
       function GetSize(): integer;
       procedure Flush();
       procedure Abort();
@@ -129,64 +131,46 @@ begin
 end;
 
 procedure CheckVersions();
-var
-  libVersion: cuint;
-  headerVersion: cuint;
 
-  function hexVerToStr(Version: cuint): string;
+  function VerToStr(Version: cuint): string;
   var
     Major, Minor, Release: cardinal;
   begin
-    Major   := (Version shr 16) and $FF;;
+    Major   := (Version shr 16) and $FF;
     Minor   := (Version shr 8) and $FF;
     Release := Version and $FF;
     Result := Format('%d.%d.%d', [Major, Minor, Release]);
   end;
 
+  { FFmpeg guarantees ABI compatibility as long as the major version is the
+    same, so a different minor or release version of the DLL is fine.
+    The DLL must not be older than the header though, as functions or struct
+    fields the header relies on might be missing. }
+  procedure CheckLib(const LibName: string; LibVersion, HeaderVersion: cuint);
+  begin
+    if ((LibVersion shr 16) <> (HeaderVersion shr 16)) then
+    begin
+      Log.LogError(Format('%s header (%s) and DLL (%s) major versions do not match.',
+          [LibName, VerToStr(HeaderVersion), VerToStr(LibVersion)]));
+    end
+    else if (LibVersion < HeaderVersion) then
+    begin
+      Log.LogError(Format('%s DLL (%s) is older than the header (%s).',
+          [LibName, VerToStr(LibVersion), VerToStr(HeaderVersion)]));
+    end;
+  end;
+
 begin
-  libVersion := avcodec_version();
-  headerVersion := AV_VERSION_INT(
-      LIBAVCODEC_VERSION_MAJOR,
-      LIBAVCODEC_VERSION_MINOR,
-      LIBAVCODEC_VERSION_RELEASE);
-  if (libVersion <> headerVersion) then
-  begin
-    Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
-        ['libavcodec', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
-  end;
-
-  libVersion := avformat_version();
-  headerVersion := AV_VERSION_INT(
-      LIBAVFORMAT_VERSION_MAJOR,
-      LIBAVFORMAT_VERSION_MINOR,
-      LIBAVFORMAT_VERSION_RELEASE);
-  if (libVersion <> headerVersion) then
-  begin
-    Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
-        ['libavformat', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
-  end;
-
-  libVersion := avutil_version();
-  headerVersion := AV_VERSION_INT(
-      LIBAVUTIL_VERSION_MAJOR,
-      LIBAVUTIL_VERSION_MINOR,
-      LIBAVUTIL_VERSION_RELEASE);
-  if (libVersion <> headerVersion) then
-  begin
-    Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
-        ['libavutil', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
-  end;
-
-  libVersion := swscale_version();
-  headerVersion := AV_VERSION_INT(
-      LIBSWSCALE_VERSION_MAJOR,
-      LIBSWSCALE_VERSION_MINOR,
-      LIBSWSCALE_VERSION_RELEASE);
-  if (libVersion <> headerVersion) then
-  begin
-    Log.LogError(Format('%s header (%s) and DLL (%s) versions do not match.',
-        ['libswscale', hexVerToStr(headerVersion), hexVerToStr(libVersion)]));
-  end;
+  CheckLib('libavcodec', avcodec_version(),
+      AV_VERSION_INT(LIBAVCODEC_VERSION_MAJOR, LIBAVCODEC_VERSION_MINOR, LIBAVCODEC_VERSION_RELEASE));
+  CheckLib('libavformat', avformat_version(),
+      AV_VERSION_INT(LIBAVFORMAT_VERSION_MAJOR, LIBAVFORMAT_VERSION_MINOR, LIBAVFORMAT_VERSION_RELEASE));
+  CheckLib('libavutil', avutil_version(),
+      AV_VERSION_INT(LIBAVUTIL_VERSION_MAJOR, LIBAVUTIL_VERSION_MINOR, LIBAVUTIL_VERSION_RELEASE));
+  CheckLib('libswscale', swscale_version(),
+      AV_VERSION_INT(LIBSWSCALE_VERSION_MAJOR, LIBSWSCALE_VERSION_MINOR, LIBSWSCALE_VERSION_RELEASE));
+  CheckLib('libswresample', swresample_version(),
+      AV_VERSION_INT(LIBSWRESAMPLE_VERSION_MAJOR, LIBSWRESAMPLE_VERSION_MINOR, LIBSWRESAMPLE_VERSION_RELEASE));
 end;
 
 constructor TMediaCore_FFmpeg.Create();
@@ -361,6 +345,12 @@ begin
     raise EInvalidContainer.Create('FFmpegStreamRead on nil');
   try
     Result := Stream.Read(buf[0], size);
+    // The read callback of an AVIOContext must never return 0, it has to
+    // return AVERROR_EOF at the end of the stream. Otherwise the end of the
+    // file is not signaled to libavformat and some demuxers (e.g. AVI) can
+    // loop forever at the end of the file.
+    if ((Result = 0) and (size > 0)) then
+      Result := AVERROR_EOF;
   except
     Result := -1;
   end;
@@ -419,21 +409,50 @@ function TMediaCore_FFmpeg.AVFormatOpenInput(ps: PPAVFormatContext; filename: {c
 var
   h: Pointer;
   buffer: Pointer;
+  pb: PAVIOContext;
 begin
+  // open the stream first. Until now the result was ignored and h was not
+  // initialized if the file could not be opened.
+  h := nil;
+  if (FFmpegStreamOpen(h, filename, URL_RDONLY) < 0) then
+  begin
+    ps^ := nil;
+    Result := AVERROR(ENOENT);
+    Exit;
+  end;
+
   ps^ := avformat_alloc_context();
   buffer := av_malloc(BLOCKSIZE);
-  FFmpegStreamOpen(h, filename, URL_RDONLY);
-  ps^^.pb := avio_alloc_context(buffer, BLOCKSIZE, 0, h, FFmpegStreamRead, FFmpegStreamWrite, FFmpegStreamSeek);
+  pb := avio_alloc_context(buffer, BLOCKSIZE, 0, h, FFmpegStreamRead, FFmpegStreamWrite, FFmpegStreamSeek);
+  ps^^.pb := pb;
   Result := avformat_open_input(ps, filename, nil, nil);
+  if (Result <> 0) then
+  begin
+    // avformat_open_input() frees the AVFormatContext on failure, but it does
+    // not free a custom AVIOContext (AVFMT_FLAG_CUSTOM_IO).
+    av_freep(@pb^.buffer);
+    FFmpegStreamClose(h);
+    avio_context_free(@pb);
+  end;
 end;
 
 procedure TMediaCore_FFmpeg.AVFormatCloseInput(ps: PPAVFormatContext);
+var
+  pb: PAVIOContext;
 begin
-  av_free(ps^^.pb.buffer);
-  FFmpegStreamClose(ps^^.pb.opaque);
-  { avformat_close_input frees AVIOContext pb, no avio_close needed }
-  { avformat_close_input frees AVFormatContext, no additional avformat_free_context needed }
+  pb := ps^^.pb;
+  // avformat_close_input() frees the AVFormatContext. It does NOT free an
+  // AVIOContext that was passed by us (AVFMT_FLAG_CUSTOM_IO), so we have to
+  // free it (and the stream behind it) ourselves after closing the input.
   avformat_close_input(ps);
+  if (pb <> nil) then
+  begin
+    // Note: libavformat may have reallocated the buffer, so we must free
+    // pb^.buffer and not the pointer we have passed to avio_alloc_context().
+    av_freep(@pb^.buffer);
+    FFmpegStreamClose(pb^.opaque);
+    avio_context_free(@pb);
+  end;
 end;
 
 { TPacketQueue }
@@ -479,42 +498,48 @@ end;
 
 (**
  * Adds a packet to the end of the queue.
- * Put() takes over the packet: for regular packets the queue keeps its own
- * reference and the caller's reference is released (like av_dup_packet() did
- * before), so the caller must not use or free the packet afterwards.
- * Status packets are copied as they are.
+ * Put() takes over the packet: all its data (including the reference to its
+ * buffer) is moved into a packet owned by the queue and the caller's packet is
+ * reset. The caller keeps ownership of the AVPacket struct itself and may
+ * reuse it, but must not use its data anymore.
+ * Status packets are moved as they are.
  *)
 function TPacketQueue.Put(Packet : PAVPacket): integer;
 var
   CurrentListEntry : PPacketListEntry;
-  RefResult: integer;
 begin
   Result := -1;
 
   if (Packet = nil) then
     Exit;
 
-  CurrentListEntry := av_malloc(SizeOf(TPacketListEntry));
-  if (CurrentListEntry = nil) then
-    Exit;
-  FillChar(CurrentListEntry^, SizeOf(TPacketListEntry), 0);
-
   if (PChar(Packet^.data) <> STATUS_PACKET) then
   begin
-    // the queue gets its own reference, so the data does not depend on
-    // the demuxer's internal buffers
-    RefResult := av_packet_ref(@CurrentListEntry^.pkt, Packet);
-    // release the caller's reference
-    av_packet_unref(Packet);
-    if (RefResult < 0) then
+    // the data must not depend on the demuxer's internal buffers
+    if (av_packet_make_refcounted(Packet) < 0) then
     begin
-      av_free(CurrentListEntry);
+      av_packet_unref(Packet);
       Exit;
     end;
-  end
-  else
-    CurrentListEntry^.pkt := Packet^;
+  end;
 
+  CurrentListEntry := av_malloc(SizeOf(TPacketListEntry));
+  if (CurrentListEntry = nil) then
+  begin
+    av_packet_unref(Packet);
+    Exit;
+  end;
+
+  CurrentListEntry^.pkt := av_packet_alloc();
+  if (CurrentListEntry^.pkt = nil) then
+  begin
+    av_free(CurrentListEntry);
+    av_packet_unref(Packet);
+    Exit;
+  end;
+
+  // move all fields of the packet into the entry and reset the caller's packet
+  av_packet_move_ref(CurrentListEntry^.pkt, Packet);
   CurrentListEntry^.next := nil;
 
   SDL_LockMutex(Mutex);
@@ -527,7 +552,7 @@ begin
     LastListEntry := CurrentListEntry;
     Inc(PacketCount);
 
-    Size := Size + CurrentListEntry^.pkt.size;
+    Size := Size + CurrentListEntry^.pkt^.size;
     SDL_CondSignal(Condition);
   finally
     SDL_UnlockMutex(Mutex);
@@ -557,23 +582,27 @@ begin
   end;
   TempPacket^.data  := Pointer(STATUS_PACKET);
   TempPacket^.flags := StatusFlag;
-  // put a copy of the package into the queue
+  // put the package into the queue (its content is moved into the queue)
   Result := Put(TempPacket);
-  // data has been copied -> delete temp. package
-  // (the status marker is no allocated data, av_packet_free() does not touch it)
+  // delete the temp. package struct
   av_packet_free(@TempPacket);
 end;
 
-procedure TPacketQueue.FreeStatusInfo(var Packet: TAVPacket);
+procedure TPacketQueue.FreeStatusInfo(Packet: PAVPacket);
 begin
 end;
 
-function TPacketQueue.GetStatusInfo(var Packet: TAVPacket): Pointer;
+function TPacketQueue.GetStatusInfo(Packet: PAVPacket): Pointer;
 begin
   Result := nil;
 end;
 
-function TPacketQueue.Get(var Packet: TAVPacket; Blocking: boolean): integer;
+(**
+ * Removes the first packet of the queue and moves it into Packet.
+ * Packet must be an allocated AVPacket (e.g. av_packet_alloc()). Data it still
+ * references is released.
+ *)
+function TPacketQueue.Get(Packet: PAVPacket; Blocking: boolean): integer;
 var
   CurrentListEntry: PPacketListEntry;
 const
@@ -596,8 +625,11 @@ begin
           LastListEntry := nil;
         Dec(PacketCount);
 
-        Size := Size - CurrentListEntry^.pkt.size;
-        Packet := CurrentListEntry^.pkt;
+        Size := Size - CurrentListEntry^.pkt^.size;
+        // release data the caller may still reference and take over the packet
+        av_packet_unref(Packet);
+        av_packet_move_ref(Packet, CurrentListEntry^.pkt);
+        av_packet_free(@CurrentListEntry^.pkt);
         av_free(CurrentListEntry);
 
         Result := 1;
@@ -642,10 +674,10 @@ begin
   begin
     TempListEntry := CurrentListEntry^.next;
     // free status data
-    if (PChar(CurrentListEntry^.pkt.data) = STATUS_PACKET) then
+    if (PChar(CurrentListEntry^.pkt^.data) = STATUS_PACKET) then
       FreeStatusInfo(CurrentListEntry^.pkt);
-    // free packet data
-    av_packet_unref(@CurrentListEntry^.pkt);
+    // free packet (data and struct)
+    av_packet_free(@CurrentListEntry^.pkt);
     // Note: param must be a pointer to a pointer!
     av_freep(@CurrentListEntry);
     CurrentListEntry := TempListEntry;
