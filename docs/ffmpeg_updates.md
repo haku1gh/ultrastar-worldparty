@@ -2,14 +2,13 @@ Goal is to update UltraStar from FFmpeg 4.x to FFmpeg 9.0
 
 A step-by-step approach will be done:
 1. Modernize all FFmpeg API calls so that no deprecated calls are included
-2. Replace FFmpeg 4.x libraries with FFmpeg 5.x Libraries
-3. Remove obsolete FFmpeg library definitions
-4. Modernize all FFmpeg API calls so that no deprecated calls are included
-5. Replace FFmpeg 5.x libraries with FFmpeg 7.x Libraries
+2. Upgrade to FFmpeg 5.1 Libraries
+3. Fix encountered smaller issues
+4. Upgrade to FFmpeg 7.1 Libraries
+5. Upgrade to FFmpeg 9.x Libraries
+6. Fix encountered smaller issues
 6. Remove obsolete FFmpeg library definitions
-7. Modernize all FFmpeg API calls so that no deprecated calls are included
-8. Replace FFmpeg 7.x libraries with FFmpeg 9.x Libraries
-9. Remove obsolete FFmpeg library definitions
+7. Optional, removal of older FFmpeg libraries
 
 Step 1:
 ===============================================================================
