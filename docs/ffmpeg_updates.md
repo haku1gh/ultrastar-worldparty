@@ -10,7 +10,7 @@ A step-by-step approach will be done:
 6. Remove obsolete FFmpeg library definitions
 7. Optional, removal of older FFmpeg libraries
 
-Step 1:
+Step 1: Modernize all FFmpeg API calls
 ===============================================================================
 - DONE: Remove dead code for FFmpeg versions below 4.x
 - DONE: Update API calls for Video and Image
@@ -22,7 +22,7 @@ Step 1:
   - Modified the open and close channel_layouts
   - Made flush of buffers easier
 
-Step 2:
+Step 2: Upgrade to FFmpeg 5.1 Libraries
 ===============================================================================
 - DONE: Retrieve latest FFmpeg 5.x libraries and C-headers.
   - Downloaded windows build 5.1.10 from https://system233.github.io/ffmpeg-msvc-prebuilt/en/releases.html
@@ -39,9 +39,12 @@ Step 2:
     new ffmpeg-5.1 folder
 - DONE: Replaced FFmpeg DLLs in the game folder
 
-Step 3:
+Step 3: Fix encountered smaller issues
 ===============================================================================
-- OPEN:
+- DONE: Function avio_context_free in avio.pas had a wrong parameter
+  declared. This was checked with the original header files and indeed a double
+  pointer is required instead of a single pointer. This function hasn't been
+  used so far.
 
 
 Open Topics for later
@@ -62,9 +65,6 @@ Things that came up while improving the FFmpeg libraries.
   Could lead to crashes.
 - OPEN: The decoder is not emptied at the end of the video. It seens to not
   cause an issue, but there should be some frames lost. Check if this is ok.
-- OPEN: Function avio_context_free in avio.pas has probably a wrong parameter
-  declared. Check with the original header files. It could be that a double
-  pointer is required and not just a single pointer.
 - OPEN: fAudioBuffer is being created with GetAlignedMem but never release.
   Plus the pointer to DecodeFrame is rewired to frame.data[0]. This is a small
   memory leak.

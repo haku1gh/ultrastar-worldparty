@@ -522,7 +522,7 @@ function avio_alloc_context(
  * @param s Double pointer to the IO context. This function will write NULL
  * into s.
  *)
-procedure avio_context_free(s: PAVIOContext);
+procedure avio_context_free(s: PPAVIOContext);
   cdecl; external av__format;
 
 procedure avio_w8(s: PAVIOContext; b: cint);
