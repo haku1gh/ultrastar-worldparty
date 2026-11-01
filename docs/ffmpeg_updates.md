@@ -1,4 +1,5 @@
-Goal is to update UltraStar from FFmpeg 4.x to FFmpeg 9.0
+Update of UltraStar 21.02 from FFmpeg 4.x to FFmpeg 9.0
+===============================================================================
 
 A step-by-step approach will be done:
 1. Modernize all FFmpeg API calls so that no deprecated calls are included
@@ -7,8 +8,6 @@ A step-by-step approach will be done:
 4. Upgrade to FFmpeg 7.1 Libraries
 5. Upgrade to FFmpeg 9.x Libraries
 6. Fix encountered smaller issues
-7. Remove unused FFmpeg library definitions
-8. Optional, removal of older FFmpeg libraries
 
 Step 1: Modernize all FFmpeg API calls
 ===============================================================================
@@ -97,19 +96,15 @@ Step 6: Fix encountered smaller issues
 - DONE: FFmpeg was just using 1 thread up to now. Changed the FFmpeg context
   setting to auto detect available CPU cores and use that value for number of
   threads.
-
-
-Open Topics for later
-===============================================================================
-Things that came up while improving the FFmpeg libraries.
-
-- OPEN: There are >= 30 warnings in the code. Check each warning and correct
-  if possible.
-- OPEN: When BASS is deactivated and therefore FFmpeg for audio is used, then
-  songs will not end. The remaining time counter will just continue with
-  negative numbers. This issue might not be related to the FFmpeg updates! As
-  a workaround: just press ESC at the end of the song. Also no audio can be
-  heard and a UAudioDecoder_FFmpeg version added with debug prints didn't
-  show anything. Strange.
+- OPEN: Audio files with the FFmpeg decoder are probably not correctly released
+  after the playback ended. Check for improvement.
+- OPEN: Remove older FFmpeg libraries
+- OPEN: Automatic thread detection is not correctly working on older hardware
+  (e.g. 18year old PC). Either set a fixed thread amount, e.g. 4. Or find some
+  other workaround.
 - OPEN: Check for unused/obsolete defines. E.g. FF_API_DEBUG_MV could be one
   of it.
+- OPEN: Check if all the API definitions are really needed and if not, maybe
+  delete unused API's.
+- OPEN: There are >= 30 warnings in the code. Check each warning and correct
+  if possible.
