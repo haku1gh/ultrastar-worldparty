@@ -28,9 +28,9 @@ Step 2: Upgrade to FFmpeg 5.1 Libraries
   - Downloaded windows build 5.1.10 from https://system233.github.io/ffmpeg-msvc-prebuilt/en/releases.html
   - Identify required and potential useful headers for UltraStar
 - DONE: Create the new library folder ffmpeg-5.1
-  - Copy files from ffmpeg-4.0 over to ffmpeg-5.1
+  - Copied files from ffmpeg-4.0 over to ffmpeg-5.1
   - Add API definitions for channel layout
-  - Remove deprecated parts
+  - Removed deprecated parts
   - Updated version fields
   - Records TAVCodecContext, TAVPacket, TAVCodecParameters, TAVCodec, TAVStream,
     TAVFormatContext, TAVIOContext and TAVFrame rebuild from the C structs
@@ -61,7 +61,27 @@ Step 3: Fix encountered smaller issues
 
 Step 4: Upgrade to FFmpeg 7.1 Libraries
 ===============================================================================
-- OPEN: Retrieve latest FFmpeg 7.x libraries and C-headers.
+- DONE: Retrieve latest FFmpeg 7.x libraries and C-headers.
+  - Downloaded windows build 7.1.15 from https://system233.github.io/ffmpeg-msvc-prebuilt/en/releases.html
+  - Identify required and potential useful headers for UltraStar
+- DONE: Create the new library folder ffmpeg-7.1
+  - Copied files from ffmpeg-5.1 over to ffmpeg-7.1
+  - Removed deprecated parts
+  - Updated version fields
+  - FFmpeg Records rebuild from the C structs
+  - Reworked audio decoder's channel layout. Old functions are no longer
+    available.
+- DONE: Updated UVideo.pas where the debug_mv field became obsolete
+- DONE: Updated UAudioDecoder_FFmpeg.pas; reworked audio decoder's channel
+  layout. Old functions are no longer available.
+- DONE: Updated config files (config-win.inc and configure-ac) to point to the
+  new ffmpeg-7.1 folder
+- DONE: Replaced FFmpeg DLLs in the game folder
+
+Step 5: Upgrade to FFmpeg 9.x Libraries
+===============================================================================
+- OPEN: Retrieve latest FFmpeg 9.x libraries and C-headers.
+
 
 Open Topics for later
 ===============================================================================
@@ -72,4 +92,10 @@ Things that came up while improving the FFmpeg libraries.
 - OPEN: When BASS is deactivated and therefore FFmpeg for audio is used, then
   songs will not end. The remaining time counter will just continue with
   negative numbers. This issue might not be related to the FFmpeg updates! As
-  a workaround: just press ESC at the end of the song.
+  a workaround: just press ESC at the end of the song. Also no audio can be
+  heard and a UAudioDecoder_FFmpeg version added with debug prints didn't
+  show anything. Strange.
+- OPEN: Check for unused/obsolete defines. E.g. FF_API_DEBUG_MV could be one
+  of it.
+- OPEN: It seems that FFmpeg is in use with just 1 thread. Check possibilities
+  for multithreading.

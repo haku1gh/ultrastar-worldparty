@@ -336,7 +336,6 @@ begin
   end;
 
   // set debug options
-  fCodecContext^.debug_mv := 0;
   fCodecContext^.debug := 0;
 
   // detect bug-workarounds automatically

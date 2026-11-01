@@ -285,6 +285,9 @@ function TFFmpegDecodeStream.Open(const Filename: IPath): boolean;
 var
   SampleFormat: TAudioSampleFormat;
   PackedSampleFormat: TAVSampleFormat;
+  InLayout, OutLayout: TAVChannelLayout;
+  OutChannels: integer;
+  NeedSwr: boolean;
   // TestFrame: TAVPacket;
   AVResult: integer;
 begin
@@ -372,12 +375,7 @@ begin
     Exit;
   end;
 
-  // TODO: should we use this or not? Should we allow 5.1 channel audio?
-
-  fCodecCtx^.request_channel_layout := ($20000000 or $40000000); //avcodec.c AV_CH_LAYOUT_STEREO_DOWNMIX;
-
   // set debug options
-  fCodecCtx^.debug_mv := 0;
   fCodecCtx^.debug := 0;
 
   // request required sample format
@@ -410,6 +408,27 @@ begin
 
   // now initialize the audio-format
   PackedSampleFormat := av_get_packed_sample_fmt(fCodecCtx^.sample_fmt);
+
+  // Channel layouts.
+  // The old fields channels, channel_layout and request_channel_layout have
+  // been replaced by AVChannelLayout (ch_layout). Previously we asked the
+  // decoder for a stereo downmix (request_channel_layout, which only some
+  // decoders honored). Now libswresample downmixes to stereo if the stream has
+  // more than two channels.
+  FillChar(InLayout, SizeOf(InLayout), 0);
+  FillChar(OutLayout, SizeOf(OutLayout), 0);
+  av_channel_layout_copy(@InLayout, @fCodecCtx^.ch_layout);
+  if (InLayout.order = AV_CHANNEL_ORDER_UNSPEC) then
+    av_channel_layout_default(@InLayout, InLayout.nb_channels);
+  if (InLayout.nb_channels > 2) then
+    av_channel_layout_default(@OutLayout, 2)
+  else
+    av_channel_layout_copy(@OutLayout, @InLayout);
+  OutChannels := OutLayout.nb_channels;
+
+  // a conversion is required for planar sample formats or if we have to downmix
+  NeedSwr := (PackedSampleFormat <> fCodecCtx^.sample_fmt) or
+             (InLayout.nb_channels <> OutChannels);
   if (PackedSampleFormat <> fCodecCtx^.sample_fmt) then
   begin
     // There is no point in leaving PackedSampleFormat as is.
@@ -417,35 +436,45 @@ begin
     // convert to AV_SAMPLE_FMT_S16 anyway and most architectures have assembly
     // optimized conversion routines from AV_SAMPLE_FMT_FLTP to AV_SAMPLE_FMT_S16.
     PackedSampleFormat := AV_SAMPLE_FMT_S16;
-    fSwrContext := swr_alloc_set_opts(nil, fCodecCtx^.channel_layout, PackedSampleFormat, fCodecCtx^.sample_rate,
-                                      fCodecCtx^.channel_layout, fCodecCtx^.sample_fmt, fCodecCtx^.sample_rate, 0, nil);
-    if (fSwrContext = nil) then
-      Log.LogStatus('Error: Failed to create SwrContext', 'TFFmpegDecodeStream.Open')
-    else
-    begin
-      av_opt_set_int(fSwrContext, 'ich', fCodecCtx^.channels, 0);
-      av_opt_set_int(fSwrContext, 'och', fCodecCtx^.channels, 0);
-      if (swr_init(fSwrContext) < 0) then
-      begin
-        swr_free(@fSwrContext);
-        Log.LogStatus('Error: Failed to initialize SwrContext', 'TFFmpegDecodeStream.Open');
-      end;
-    end;
   end;
+
+  if (NeedSwr) then
+  begin
+    fSwrContext := nil;
+    if ((swr_alloc_set_opts2(@fSwrContext, @OutLayout, PackedSampleFormat, fCodecCtx^.sample_rate,
+                             @InLayout, fCodecCtx^.sample_fmt, fCodecCtx^.sample_rate, 0, nil) < 0) or
+        (fSwrContext = nil)) then
+    begin
+      fSwrContext := nil;
+      Log.LogStatus('Error: Failed to create SwrContext', 'TFFmpegDecodeStream.Open');
+    end
+    else if (swr_init(fSwrContext) < 0) then
+    begin
+      swr_free(@fSwrContext);
+      Log.LogStatus('Error: Failed to initialize SwrContext', 'TFFmpegDecodeStream.Open');
+    end;
+
+    // without a converter the unmodified channels are delivered
+    if (fSwrContext = nil) then
+      OutChannels := InLayout.nb_channels;
+  end;
+
+  av_channel_layout_uninit(@InLayout);
+  av_channel_layout_uninit(@OutLayout);
 
   if (not FFmpegCore.ConvertFFmpegToAudioFormat(PackedSampleFormat, SampleFormat)) then
   begin
     // try standard format
     SampleFormat := asfS16;
   end;
-  if fCodecCtx^.channels > 255 then
-    Log.LogStatus('Error: CodecCtx^.channels > 255', 'TFFmpegDecodeStream.Open');
+  if OutChannels > 255 then
+    Log.LogStatus('Error: channels > 255', 'TFFmpegDecodeStream.Open');
   fFormatInfo := TAudioFormatInfo.Create(
-    byte(fCodecCtx^.channels),
+    byte(OutChannels),
     fCodecCtx^.sample_rate,
     SampleFormat
   );
-  fBytesPerSample := av_get_bytes_per_sample(PackedSampleFormat) * fCodecCtx^.channels;
+  fBytesPerSample := av_get_bytes_per_sample(PackedSampleFormat) * OutChannels;
 
   fPacketQueue := TPacketQueue.Create();
 

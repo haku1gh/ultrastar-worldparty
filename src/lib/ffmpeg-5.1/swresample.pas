@@ -232,6 +232,12 @@ function swr_alloc_set_opts(s: PSwrContext;
  *
  * @param[in] s a pointer to a pointer to Swr context
  *)
+function swr_alloc_set_opts2(ps: PPSwrContext;
+                             out_ch_layout: {const} PAVChannelLayout; out_sample_fmt: TAVSampleFormat; out_sample_rate: cint;
+                             in_ch_layout:  {const} PAVChannelLayout; in_sample_fmt:  TAVSampleFormat; in_sample_rate:  cint;
+                             log_offset: cint; log_ctx: pointer): cint;
+  cdecl; external sw__resample;
+
 procedure swr_free(s: PPSwrContext);
   cdecl; external sw__resample;
 
