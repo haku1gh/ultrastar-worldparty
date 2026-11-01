@@ -7,8 +7,8 @@ A step-by-step approach will be done:
 4. Upgrade to FFmpeg 7.1 Libraries
 5. Upgrade to FFmpeg 9.x Libraries
 6. Fix encountered smaller issues
-6. Remove obsolete FFmpeg library definitions
-7. Optional, removal of older FFmpeg libraries
+7. Remove unused FFmpeg library definitions
+8. Optional, removal of older FFmpeg libraries
 
 Step 1: Modernize all FFmpeg API calls
 ===============================================================================
@@ -78,9 +78,22 @@ Step 4: Upgrade to FFmpeg 7.1 Libraries
   new ffmpeg-7.1 folder
 - DONE: Replaced FFmpeg DLLs in the game folder
 
-Step 5: Upgrade to FFmpeg 9.x Libraries
+Step 5: Upgrade to FFmpeg 9.0 Libraries
 ===============================================================================
-- OPEN: Retrieve latest FFmpeg 9.x libraries and C-headers.
+- DONE: Retrieve latest FFmpeg 9.x libraries and C-headers.
+  - Downloaded windows build 9.0.2 from https://system233.github.io/ffmpeg-msvc-prebuilt/en/releases.html
+  - Identify required and potential useful headers for UltraStar
+- DONE: Create the new library folder ffmpeg-9.0
+  - Copied files from ffmpeg-7.1 over to ffmpeg-9.0
+  - Updated version fields
+  - FFmpeg Records rebuild from the C structs
+- DONE: Pixelformat requires a new enum AlphaMode
+- DONE: Updated config files (config-win.inc and configure-ac) to point to the
+  new ffmpeg-9.1 folder
+- DONE: Replaced FFmpeg DLLs in the game folder
+
+Step 6: Fix encountered smaller issues
+===============================================================================
 
 
 Open Topics for later

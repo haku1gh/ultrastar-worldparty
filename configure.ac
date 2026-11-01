@@ -271,7 +271,9 @@ AC_SUBST_DEFINE(HAVE_SWRESAMPLE, $libswresample_HAVE)
 # map avutil library version to ffmpeg version
 AC_MSG_CHECKING([version of ffmpeg])
 # the order is ([avutil], [avcodec], [avformat], [swscale], [swresample])
-if   FFMPEG_LIBS_COMPATIBLE([59039100], [61019100], [61007100], [8003100], [5003100]); then
+if   FFMPEG_LIBS_COMPATIBLE([61001100], [63001100], [63001100], [10001100], [7001100]); then
+    FFMPEG_VERSION="9.0"
+elif FFMPEG_LIBS_COMPATIBLE([59039100], [61019100], [61007100], [8003100], [5003100]); then
     FFMPEG_VERSION="7.1"
 elif FFMPEG_LIBS_COMPATIBLE([57028100], [59037100], [59027100], [6007100], [4007100]); then
     FFMPEG_VERSION="5.1"
@@ -322,7 +324,7 @@ elif test $libavutil_VERSION_INT -le 50024000 -a $libavutil_VERSION_INT -ge 4900
 else
     AC_MSG_ERROR([
 
-Unsupported ffmpeg version, most recent version supported is 7.1.
+Unsupported ffmpeg version, most recent version supported is 9.0.
 ])
 fi
 AX_EXTRACT_VERSION(FFMPEG, $FFMPEG_VERSION)

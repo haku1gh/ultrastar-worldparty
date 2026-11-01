@@ -35,33 +35,33 @@
 //the required DLLs can be downloaded here: https://ffmpeg.zeranoe.com/builds/win32/shared/
 {$MACRO ON}
 {$IFNDEF FFMPEG_DIR}
-  {$DEFINE FFMPEG_DIR := 'ffmpeg-7.1'}
+  {$DEFINE FFMPEG_DIR := 'ffmpeg-9.0'}
 {$ENDIF}
 {$IF Defined(IncludeConstants)}
-  FFMPEG_VERSION_INT = 7001005;
-  av__codec = 'avcodec-61';
-  LIBAVCODEC_VERSION_MAJOR = 61;
-  LIBAVCODEC_VERSION_MINOR = 19;
+  FFMPEG_VERSION_INT = 9000002;
+  av__codec = 'avcodec-63';
+  LIBAVCODEC_VERSION_MAJOR = 63;
+  LIBAVCODEC_VERSION_MINOR = 1;
   LIBAVCODEC_VERSION_RELEASE = 100;
 
-  av__format = 'avformat-61';
-  LIBAVFORMAT_VERSION_MAJOR = 61;
-  LIBAVFORMAT_VERSION_MINOR = 7;
+  av__format = 'avformat-63';
+  LIBAVFORMAT_VERSION_MAJOR = 63;
+  LIBAVFORMAT_VERSION_MINOR = 1;
   LIBAVFORMAT_VERSION_RELEASE = 100;
 
-  av__util = 'avutil-59';
-  LIBAVUTIL_VERSION_MAJOR = 59;
-  LIBAVUTIL_VERSION_MINOR = 39;
+  av__util = 'avutil-61';
+  LIBAVUTIL_VERSION_MAJOR = 61;
+  LIBAVUTIL_VERSION_MINOR = 1;
   LIBAVUTIL_VERSION_RELEASE = 100;
 
-  sw__resample = 'swresample-5';
-  LIBSWRESAMPLE_VERSION_MAJOR   = 5;
-  LIBSWRESAMPLE_VERSION_MINOR   = 3;
+  sw__resample = 'swresample-7';
+  LIBSWRESAMPLE_VERSION_MAJOR   = 7;
+  LIBSWRESAMPLE_VERSION_MINOR   = 1;
   LIBSWRESAMPLE_VERSION_RELEASE = 100;
 
-  sw__scale = 'swscale-8';
-  LIBSWSCALE_VERSION_MAJOR   = 8;
-  LIBSWSCALE_VERSION_MINOR   = 3;
+  sw__scale = 'swscale-10';
+  LIBSWSCALE_VERSION_MAJOR   = 10;
+  LIBSWSCALE_VERSION_MINOR   = 1;
   LIBSWSCALE_VERSION_RELEASE = 100;
 {$IFEND}
 
