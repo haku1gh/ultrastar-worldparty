@@ -337,7 +337,8 @@ begin
 
   // set debug options
   fCodecContext^.debug := 0;
-
+  fCodecContext^.thread_count := 0;
+  
   // detect bug-workarounds automatically
   fCodecContext^.workaround_bugs := FF_BUG_AUTODETECT;
   // error resilience strategy (careful/compliant/agressive/very_aggressive)

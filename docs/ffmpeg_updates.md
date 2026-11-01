@@ -94,6 +94,9 @@ Step 5: Upgrade to FFmpeg 9.0 Libraries
 
 Step 6: Fix encountered smaller issues
 ===============================================================================
+- DONE: FFmpeg was just using 1 thread up to now. Changed the FFmpeg context
+  setting to auto detect available CPU cores and use that value for number of
+  threads.
 
 
 Open Topics for later
@@ -110,5 +113,3 @@ Things that came up while improving the FFmpeg libraries.
   show anything. Strange.
 - OPEN: Check for unused/obsolete defines. E.g. FF_API_DEBUG_MV could be one
   of it.
-- OPEN: It seems that FFmpeg is in use with just 1 thread. Check possibilities
-  for multithreading.
