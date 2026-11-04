@@ -337,8 +337,13 @@ begin
 
   // set debug options
   fCodecContext^.debug := 0;
-  fCodecContext^.thread_count := 0;
-  
+
+  // explicitly setting this value to 8 and not 0 (automatic detection), as
+  // this not works correctly on older hardware. E.g. on dual/quad cores from
+  // 2008. Value 8 was tested on such older hardware as well as newer hardware
+  // and was found to give the best performance.
+  fCodecContext^.thread_count := 8;
+
   // detect bug-workarounds automatically
   fCodecContext^.workaround_bugs := FF_BUG_AUTODETECT;
   // error resilience strategy (careful/compliant/agressive/very_aggressive)
