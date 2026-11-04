@@ -134,6 +134,7 @@ type
       fAudioPaketData:    PByteArray;
       fAudioPaketSize:    integer;
       fAudioPaketSilence: integer; // number of bytes of silence to return
+      fDraining:          boolean; // EOF reached: the decoder was flushed and delivers its remaining frames
 
       // state-vars for AudioCallback (locked by DecoderLock)
       fAudioBufferPos:  integer;
@@ -246,6 +247,7 @@ begin
   fAudioPaketData := nil;
   fAudioPaketSize := 0;
   fAudioPaketSilence := 0;
+  fDraining := false;
 
   fAudioBuffer := nil;
   fAudioBufferPos := 0;
@@ -842,6 +844,7 @@ begin
               fAudioBufferPos := 0;
               fAudioPaketSize := 0;
               fAudioPaketSilence := 0;
+              fDraining := false;
               FlushCodecBuffers();
 
               // Set preliminary stream position. The position will be set to
@@ -1022,6 +1025,17 @@ begin
       DataSize := AUDIO_BUFFER_SIZE;
 
       got_frame_ptr := avcodec_receive_frame(fCodecCtx, fAudioBufferFrame);
+
+      // The decoder was flushed at the end of the file and has no more frames
+      // (the result is AVERROR_EOF): the stream has ended.
+      if (fDraining and (got_frame_ptr <> 0)) then
+      begin
+        fAudioPaketSize := 0;
+        SetEOF(true);
+        // buffer contains no data -> result = -1
+        Exit;
+      end;
+
       if got_frame_ptr = AVERROR(EAGAIN) then
         PaketDecodedSize := fAudioPaketSize
       else
@@ -1085,15 +1099,23 @@ begin
         PKT_STATUS_FLAG_FLUSH:
         begin
           // just used if SetPositionIntern was called without the flush flag.
+          fDraining := false;
           FlushCodecBuffers;
         end;
         PKT_STATUS_FLAG_EOF: // end-of-file
         begin
           // ignore EOF while seeking
-          if (not IsSeeking()) then
-            SetEOF(true);
-          // buffer contains no data -> result = -1
-          Exit;
+          if (IsSeeking()) then
+            Exit; // buffer contains no data -> result = -1
+
+          // All packets are decoded. Flush the decoder with a NULL packet so
+          // that it delivers the frames it still buffers, otherwise the last
+          // samples of the file would be lost. The frames are fetched in the
+          // loop above. EOF is set when the decoder reports that it is drained.
+          avcodec_send_packet(fCodecCtx, nil);
+          fDraining := true;
+          // enter the loop above (the value only has to be > 0)
+          fAudioPaketSize := 1;
         end;
         PKT_STATUS_FLAG_ERROR:
         begin
