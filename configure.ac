@@ -273,58 +273,10 @@ AC_MSG_CHECKING([version of ffmpeg])
 # the order is ([avutil], [avcodec], [avformat], [swscale], [swresample])
 if   FFMPEG_LIBS_COMPATIBLE([61001100], [63001100], [63001100], [10001100], [7001100]); then
     FFMPEG_VERSION="9.0"
-elif FFMPEG_LIBS_COMPATIBLE([59039100], [61019100], [61007100], [8003100], [5003100]); then
-    FFMPEG_VERSION="7.1"
-elif FFMPEG_LIBS_COMPATIBLE([57028100], [59037100], [59027100], [6007100], [4007100]); then
-    FFMPEG_VERSION="5.1"
-elif FFMPEG_LIBS_COMPATIBLE([56014100], [58018100], [58012100], [5001100], [3001100]); then
-    FFMPEG_VERSION="4.0"
-elif FFMPEG_LIBS_COMPATIBLE([55078100], [57107100], [57083100], [4008100], [2009100]); then
-    FFMPEG_VERSION="3.4"
-elif FFMPEG_LIBS_COMPATIBLE([55034100], [57064100,57093100], [57056100], [4002100], [2003100]); then
-    FFMPEG_VERSION="3.2" # and 3.3
-elif FFMPEG_LIBS_COMPATIBLE([55027100,55028100], [57048101], [57040101], [4001100], [2001100]); then
-    FFMPEG_VERSION="3.1"
-elif FFMPEG_LIBS_COMPATIBLE([55017103,55018100], [57024102,57037100], [57025100], [4000100], [2000101]); then
-    FFMPEG_VERSION="3.0"
-elif FFMPEG_LIBS_COMPATIBLE([54030100], [56060100], [56040101], [3001101], [1002101]); then
-    FFMPEG_VERSION="2.8"
-elif test $libavutil_VERSION_INT -le 54030100 -a $libavutil_VERSION_INT -ge 54027100; then
-    FFMPEG_VERSION="2.7"
-elif test $libavutil_VERSION_INT -eq 54020100; then
-    FFMPEG_VERSION="2.6"
-elif test $libavutil_VERSION_INT -eq 54015100; then
-    FFMPEG_VERSION="2.5"
-elif test $libavutil_VERSION_INT -eq 54007100; then
-    FFMPEG_VERSION="2.4"
-elif test $libavutil_VERSION_INT -eq 52066100; then
-    FFMPEG_VERSION="2.2"
-elif test $libavutil_VERSION_INT -le 52048101 -a $libavutil_VERSION_INT -ge 52048100; then
-    FFMPEG_VERSION="2.1"
-elif test $libavutil_VERSION_INT -le 52038100 -a $libavutil_VERSION_INT -ge 52038000; then
-    FFMPEG_VERSION="2.0"
-elif test $libavutil_VERSION_INT -le 52018100 -a $libavutil_VERSION_INT -ge 52018000; then
-    FFMPEG_VERSION="1.2"
-elif test $libavutil_VERSION_INT -le 52013100 -a $libavutil_VERSION_INT -ge 52013000; then
-    FFMPEG_VERSION="1.1"
-elif test $libavutil_VERSION_INT -le 51073101 -a $libavutil_VERSION_INT -ge 51073000; then
-    FFMPEG_VERSION="1.0"
-elif test $libavutil_VERSION_INT -le 51054100 -a $libavutil_VERSION_INT -ge 51054000; then
-    FFMPEG_VERSION="0.11"
-elif test $libavutil_VERSION_INT -le 51035100 -a $libavutil_VERSION_INT -ge 51034101; then
-    FFMPEG_VERSION="0.10"
-elif test $libavutil_VERSION_INT -eq 51032000; then
-    FFMPEG_VERSION="0.9"
-elif test $libavutil_VERSION_INT -le 51022002 -a $libavutil_VERSION_INT -ge 51009001; then
-    FFMPEG_VERSION="0.8"
-elif test $libavutil_VERSION_INT -eq 50043000; then
-    FFMPEG_VERSION="0.7"
-elif test $libavutil_VERSION_INT -le 50024000 -a $libavutil_VERSION_INT -ge 49000001; then
-    FFMPEG_VERSION="0"
 else
     AC_MSG_ERROR([
 
-Unsupported ffmpeg version, most recent version supported is 9.0.
+Unsupported ffmpeg version, ffmpeg 9.0 (or a later 9.x release) is required.
 ])
 fi
 AX_EXTRACT_VERSION(FFMPEG, $FFMPEG_VERSION)
