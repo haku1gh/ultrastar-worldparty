@@ -12,6 +12,14 @@ We added new features such as new selection song, avatars, themes,
 skins, font, improved camera and mouse support, thousands of new options
 come with this new version. Check it out!
 
+The Haku edition focuses on updating the audio/video decoders and renderers to
+support newer codecs, have better support with codecs and to improve
+performance. This will be especially visible on older HW where the original
+21.02 release could have like 4-8 FPS on the AV1 video codec, while the new
+26.11 release achieves average framerates of around 50 FPS.
+The Haku edition is only tested on Windows. It should also build for Linux, but
+is untested here.
+
 **Official Website:  https://ultrastar-es.org**
 
 ## Build
