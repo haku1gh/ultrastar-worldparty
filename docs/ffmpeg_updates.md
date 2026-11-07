@@ -1,10 +1,6 @@
 Update of UltraStar 21.02 from FFmpeg 4.x to FFmpeg 9.0
 ===============================================================================
 
-Hint: Since FFmpeg 9 is supported, the FFmpeg DLL's can be replaced by newer
-FFmpeg 9 releases. If FFmpeg.org follows their usual LTS sceme, then version 9
-will later also become an LTS version.
-
 A step-by-step approach will be done:
 1. Modernize all FFmpeg API calls so that no deprecated calls are included
 2. Upgrade to FFmpeg 5.1 Libraries
@@ -100,16 +96,12 @@ Step 6: Fix encountered smaller issues
 - DONE: FFmpeg was just using 1 thread up to now. Changed the FFmpeg context
   setting to auto detect available CPU cores and use that value for number of
   threads.
-- DONE: Audio files with the FFmpeg decoder are now correctly released
-  after the playback ended.
-- DONE: Remove older FFmpeg libraries
-- DONE: Removed restriction for a forced minor version on FFmpeg. The previous
-  change just released the restiction on the release version. As FFmpeg
-  versions are ABI compatible within a major version only a check for the major
-  version is necessary.
-- DONE: Automatic thread detection is not correctly working on older hardware
-  (e.g. 18year old PC). Easiest fix here is to set the value of threads for
-  FFmpeg to 8.
+- OPEN: Audio files with the FFmpeg decoder are probably not correctly released
+  after the playback ended. Check for improvement.
+- OPEN: Remove older FFmpeg libraries
+- OPEN: Automatic thread detection is not correctly working on older hardware
+  (e.g. 18year old PC). Either set a fixed thread amount, e.g. 4. Or find some
+  other workaround.
 - OPEN: Check for unused/obsolete defines. E.g. FF_API_DEBUG_MV could be one
   of it.
 - OPEN: Check if all the API definitions are really needed and if not, maybe
