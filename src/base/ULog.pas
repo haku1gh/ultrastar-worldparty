@@ -391,27 +391,27 @@ end;
 
 procedure TLog.LogDebug(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_DEBUG);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_DEBUG);
 end;
 
 procedure TLog.LogInfo(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_INFO);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_INFO);
 end;
 
 procedure TLog.LogStatus(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_STATUS);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_STATUS);
 end;
 
 procedure TLog.LogWarn(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_WARN);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_WARN);
 end;
 
 procedure TLog.LogError(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_ERROR);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_ERROR);
 end;
 
 procedure TLog.LogError(const Text: string);
@@ -426,7 +426,7 @@ end;
 
 procedure TLog.LogCritical(const Msg, Context: string);
 begin
-  LogMsg(Msg, Context, LOG_LEVEL_CRITICAL);
+  LogMsg(Msg + ' ['+Context+']', LOG_LEVEL_CRITICAL);
 end;
 
 type
