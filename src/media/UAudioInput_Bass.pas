@@ -1,8 +1,8 @@
 {*
     UltraStar WorldParty - Karaoke Game
-	
-	UltraStar WorldParty is the legal property of its developers, 
-	whose names	are too numerous to list here. Please refer to the 
+
+	UltraStar WorldParty is the legal property of its developers,
+	whose names	are too numerous to list here. Please refer to the
 	COPYRIGHT file distributed with this source distribution.
 
     This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program. Check "LICENSE" file. If not, see 
+    along with this program. Check "LICENSE" file. If not, see
 	<http://www.gnu.org/licenses/>.
  *}
 
@@ -308,7 +308,7 @@ begin
       Exit;
   end;
 
-  if (BASS_RecordGetInput(SourceIndex, PSingle(lVolume)) = DWORD(-1)) then
+  if (BASS_RecordGetInput(SourceIndex, PSingle(@lVolume)) = DWORD(-1)) then
   begin
     Log.LogError('BASS_RecordGetInput: ' + BassCore.ErrorGetString() , 'TBassInputDevice.GetVolume');
     Exit;
@@ -455,7 +455,7 @@ begin
         if ((SourceName = nil) and (SourceIndex = 1) and (Pos('USBMIC Serial#', Descr) > 0)) then
           SourceName := 'Microphone'
         {$ENDIF}
-        
+
         if (SourceName = nil) then
           break;
 
