@@ -9,11 +9,11 @@ if %2==compile-dll (
 if not %2==execute if not %2==execute-debug (
     if not %2==compile-debug if not %2==compile-debug-execute (
         set name=WorldParty
-        set parameters=-O4 -Xs
+        set parameters=-O4 -Xs -vm6058
     )
     if not %2==compile if not %2==compile-execute (
         set name=WorldPartyDebug
-        set parameters=-g -gl -dDEBUG_MODE
+        set parameters=-g -gl -dDEBUG_MODE -vm6058
     )
     call rm -rf ..\build ..\game\%%name%%.exe
     mkdir ..\build
