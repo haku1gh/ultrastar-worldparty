@@ -31,6 +31,14 @@ unit UVideo;
 {.$define VideoBenchmark}
 {.$define Info}
 
+// uncomment to draw with the old immediate mode code (glBegin/glEnd) instead
+// of the vertex buffer path. Useful for A/B performance comparisons.
+{.$define VideoLegacyDraw}
+
+// uncomment to draw from the vertex buffer with the fixed function pipeline
+// instead of the shader. Useful for A/B performance comparisons.
+{.$define VideoNoShader}
+
 interface
 
 {$IFDEF FPC}
@@ -63,18 +71,37 @@ uses
   UGraphic,
   UPath;
 
-const
-  PIXEL_FMT_OPENGL = GL_BGR;
-  PIXEL_FMT_FFMPEG = AV_PIX_FMT_BGR24;
-  PIXEL_FMT_SIZE = 3;
+{$IF DEFINED(cpuarm) or DEFINED(cpuaarch64)}
+  // swscale has asm routines for RGBA on ARM, but none for RGB/BGR
+  {$DEFINE PIXEL_FMT_32BITS}
+{$IFEND}
 
-  // looks strange on linux:
-  //PIXEL_FMT_OPENGL = GL_RGBA;
-  //PIXEL_FMT_FFMPEG = PIX_FMT_BGR32;
-  //PIXEL_FMT_SIZE   = 4;
+const
+{$IFDEF PIXEL_FMT_32BITS}
+  PIXEL_FMT_OPENGL = GL_RGBA;
+  PIXEL_FMT_FFMPEG = AV_PIX_FMT_RGBA;
+  PIXEL_FMT_SIZE   = 4;
+{$ELSE}
+  PIXEL_FMT_OPENGL = GL_RGB;
+  PIXEL_FMT_FFMPEG = AV_PIX_FMT_RGB24;
+  PIXEL_FMT_SIZE   = 3;
+{$ENDIF}
 
   BUFFER_ALIGN = 32;
   ReflectionH = 0.5; //reflection height (50%)
+
+  // vertex buffer: interleaved x, y, z, r, g, b, a, u, v
+  VERTEX_BYTES = 9 * SizeOf(GLfloat);
+  VBO_SIZE = 4096 * VERTEX_BYTES;
+  // video quad + up to 4 border quads
+  MAX_VERTICES = 5 * 4;
+
+type
+  TVideoVertex = packed record
+    X, Y, Z: GLfloat;
+    R, G, B, A: GLfloat;
+    U, V: GLfloat;
+  end;
 
 type
   IVideo_FFmpeg = interface (IVideo)
@@ -104,6 +131,7 @@ type
     fFrameTex:    GLuint; //**< OpenGL texture for FrameBuffer
     fFrameTexValid: boolean; //**< if true, fFrameTex contains the current frame
     fTexWidth, fTexHeight: cardinal;
+    fScaledWidth, fScaledHeight: cardinal; //**< size of the converted frame (<= texture size)
 
     fSwScaleContext: PSwsContext;
 
@@ -126,11 +154,23 @@ type
 
     fFrameDuration: extended; //**< duration of a video frame in seconds (= 1/fps)
     fFrameTime: extended; //**< video time position (absolute)
+    fNextFrameTime: extended; //**< video time position of the next frame (absolute)
     fLoopTime: extended;  //**< start time of the current loop
     fPreferDTS: boolean;
 
-    fPboEnabled: boolean;
-    fPboId:      GLuint;
+    // vertex buffer drawing
+    fUseVBO:    boolean;
+    fVBO:       GLuint;
+    fVBOCursor: integer; //**< write position in the vertex buffer (bytes)
+    fVBOBase:   integer; //**< offset of the vertices that were uploaded last (bytes)
+    fVerts:     array[0..MAX_VERTICES-1] of TVideoVertex;
+    fVertCount: integer;
+
+    // shader used for drawing from the vertex buffer
+    fUseShader: boolean;
+    fProg:      GLuint;
+    fLocUseTex: GLint;
+
     procedure Reset();
     function DecodeFrame(): boolean;
     procedure SynchronizeTime(Frame: PAVFrame; pts: double);
@@ -138,6 +178,16 @@ type
     procedure GetVideoRect(var ScreenRect, TexRect: TRectCoords);
     procedure DrawBorders(ScreenRect: TRectCoords);
     procedure DrawBordersReflected(ScreenRect: TRectCoords; AlphaUpper, AlphaLower: double);
+
+    procedure InitVertexBuffer();
+    procedure InitShader();
+    procedure AddVertex(aX, aY, aZ, aR, aG, aB, aA, aU, aV: single);
+    procedure AddBorderQuad(Left, Right, Upper, Lower, AlphaUpper, AlphaLower: single);
+    procedure AddBorders(ScreenRect: TRectCoords);
+    procedure AddBordersReflected(ScreenRect: TRectCoords; AlphaUpper, AlphaLower: double);
+    procedure UploadVertices();
+    procedure DrawVertices(First, Count: integer; Textured: boolean);
+    procedure EndVertexDraw();
 
     procedure ShowDebugInfo();
 
@@ -255,6 +305,8 @@ begin
   glGenTextures(1, PGLuint(@fFrameTex));
   SupportsNPOT := (AnsiContainsStr(glGetString(GL_EXTENSIONS),'texture_non_power_of_two')) and not (AnsiContainsStr(glGetString(GL_EXTENSIONS), 'Radeon X16'));
 
+  InitVertexBuffer();
+  InitShader();
   Reset();
 end;
 
@@ -262,19 +314,46 @@ destructor TVideo_FFmpeg.Destroy;
 begin
   Close();
   glDeleteTextures(1, PGLuint(@fFrameTex));
+  if (fProg <> 0) then
+    glDeleteProgram(fProg);
+  if (fVBO <> 0) then
+    glDeleteBuffers(1, @fVBO);
 end;
 
 function TVideo_FFmpeg.Open(const FileName : IPath): boolean;
 var
   errnum: Integer;
-  glErr: GLenum;
   AudioStreamIndex: integer;
   r_frame_rate: cdouble;
+  MaxTexSize: GLint;
+
+  // halves the larger dimension of the texture (and of the converted frame)
+  function ReduceSize: boolean;
+  var
+    tex, scale: ^cardinal;
+  begin
+    Result := false;
+    if fTexWidth >= fAspect * fTexHeight then
+    begin
+      tex := @fTexWidth;
+      scale := @fScaledWidth;
+    end
+    else
+    begin
+      tex := @fTexHeight;
+      scale := @fScaledHeight;
+    end;
+    if tex^ > 64 then
+    begin
+      tex^ := 1 shl BsrDWord(tex^ - 1);
+      scale^ := tex^;
+      Result := true;
+    end;
+  end;
+
 begin
   Result := false;
   Reset();
-
-  fPboEnabled := PboSupported;
 
   // use custom 'ufile' protocol for UTF-8 support
   errnum := FFmpegCore.AVFormatOpenInput(@fFormatContext, PAnsiChar(UTF8ToAnsi(FileName.ToUTF8)));//'ufile:'+FileName.ToUTF8));
@@ -337,8 +416,10 @@ begin
 
   // set debug options
   fCodecContext^.debug := 0;
+
+  // enable automatic thread detection
   fCodecContext^.thread_count := 0;
-  
+
   // detect bug-workarounds automatically
   fCodecContext^.workaround_bugs := FF_BUG_AUTODETECT;
   // error resilience strategy (careful/compliant/agressive/very_aggressive)
@@ -376,22 +457,10 @@ begin
   // allocate space for decoded frame and rgb frame
   fAVFrame := av_frame_alloc();
   fAVFrameRGB := av_frame_alloc();
-  fFrameBuffer := av_malloc(av_image_get_buffer_size(PIXEL_FMT_FFMPEG,
-      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height, 1));
 
-  if ((fAVFrame = nil) or (fAVFrameRGB = nil) or (fFrameBuffer = nil)) then
+  if ((fAVFrame = nil) or (fAVFrameRGB = nil)) then
   begin
     Log.LogError('Failed to allocate buffers', 'TVideoPlayback_ffmpeg.Open');
-    Close();
-    Exit;
-  end;
-
-  errnum := av_image_fill_arrays(@fAVFrameRGB^.data[0], @fAVFrameRGB^.linesize[0],
-      fFrameBuffer, PIXEL_FMT_FFMPEG,
-      (fCodecContext^.width + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fCodecContext^.height, 1);
-  if (errnum < 0) then
-  begin
-    Log.LogError('av_image_fill_arrays failed: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
     Close();
     Exit;
   end;
@@ -420,6 +489,48 @@ begin
 
   Log.LogInfo('Framerate: '+inttostr(floor(1/fFrameDuration))+'fps', 'TVideoPlayback_ffmpeg.Open');
 
+  // size of the texture and of the converted frame. Videos that are larger than
+  // the maximum texture size are scaled down by swscale (see ReduceSize).
+  fTexWidth     := fCodecContext^.width;
+  fTexHeight    := fCodecContext^.height;
+  fScaledWidth  := fCodecContext^.width;
+  fScaledHeight := fCodecContext^.height;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, @MaxTexSize);
+  while (Max(fTexWidth, fTexHeight) > MaxTexSize) do
+  begin
+    if not ReduceSize() then
+    begin
+      Log.LogError('Failed to create video texture', 'TVideoPlayback_ffmpeg.Open');
+      Close();
+      Exit;
+    end;
+  end;
+
+  if (SupportsNPOT = false) then
+  begin
+    fTexWidth   := Round(Power(2, Ceil(Log2(fTexWidth))));
+    fTexHeight  := Round(Power(2, Ceil(Log2(fTexHeight))));
+  end;
+
+  fFrameBuffer := av_malloc(av_image_get_buffer_size(PIXEL_FMT_FFMPEG,
+      (fScaledWidth + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fScaledHeight, 1));
+  if (fFrameBuffer = nil) then
+  begin
+    Log.LogError('Failed to allocate buffers', 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+
+  errnum := av_image_fill_arrays(@fAVFrameRGB^.data[0], @fAVFrameRGB^.linesize[0],
+      fFrameBuffer, PIXEL_FMT_FFMPEG,
+      (fScaledWidth + BUFFER_ALIGN - 1) and -BUFFER_ALIGN, fScaledHeight, 1);
+  if (errnum < 0) then
+  begin
+    Log.LogError('av_image_fill_arrays failed: ' + FFmpegCore.GetErrorString(errnum), 'TVideoPlayback_ffmpeg.Open');
+    Close();
+    Exit;
+  end;
+
   // if available get a SWScale-context -> faster than the deprecated img_convert().
   // SWScale has accelerated support for PIX_FMT_RGB32/PIX_FMT_BGR24/PIX_FMT_BGR565/PIX_FMT_BGR555.
   // Note: PIX_FMT_RGB32 is a BGR- and not an RGB-format (maybe a bug)!!!
@@ -429,7 +540,7 @@ begin
   fSwScaleContext := sws_getContext(
       fCodecContext^.width, fCodecContext^.height,
       fCodecContext^.pix_fmt,
-      fCodecContext^.width, fCodecContext^.height,
+      fScaledWidth, fScaledHeight,
       PIXEL_FMT_FFMPEG,
       SWS_FAST_BILINEAR, nil, nil, nil);
   if (fSwScaleContext = nil) then
@@ -439,46 +550,16 @@ begin
     Exit;
   end;
 
-  if (SupportsNPOT = false) then
-  begin
-  fTexWidth   := Round(Power(2, Ceil(Log2(fCodecContext^.width))));
-  fTexHeight  := Round(Power(2, Ceil(Log2(fCodecContext^.height))));
-  end
-  else
-  begin
-    fTexWidth   := fCodecContext^.width;
-    fTexHeight  := fCodecContext^.height;
-  end;
-
-
-  if (fPboEnabled) then
-  begin
-    glGetError();
-
-    glGenBuffersARB(1, @fPboId);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, fPboId);
-    glBufferDataARB(
-        GL_PIXEL_UNPACK_BUFFER_ARB,
-        fCodecContext^.height * fAVFrameRGB.linesize[0],
-        nil,
-        GL_STREAM_DRAW_ARB);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-
-    glErr := glGetError();
-    if (glErr <> GL_NO_ERROR) then
-    begin
-      fPboEnabled := false;
-      Log.LogError('PBO initialization failed: ' + gluErrorString(glErr), 'TVideo_FFmpeg.Open');
-    end;
-  end;
-
-  // we retrieve a texture just once with glTexImage2D and update it with glTexSubImage2D later.
-  // Benefits: glTexSubImage2D is faster and supports non-power-of-two widths/height.
+  // we create the texture storage just once with glTexImage2D and update it
+  // with glTexSubImage2D later (directly from the converted frame).
   glBindTexture(GL_TEXTURE_2D, fFrameTex);
-  glTexImage2D(GL_TEXTURE_2D, 0, 3, fTexWidth, fTexHeight, 0,
+  glTexImage2D(GL_TEXTURE_2D, 0, PIXEL_FMT_OPENGL, fTexWidth, fTexHeight, 0,
       PIXEL_FMT_OPENGL, GL_UNSIGNED_BYTE, nil);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_2D, 0);
 
   fOpened := true;
   Result := true;
@@ -493,6 +574,7 @@ begin
   fPaused := False;
   fFrameDuration := 0;
   fFrameTime := 0;
+  fNextFrameTime := 0;
   fStream := nil;
   fStreamIndex := -1;
   fFrameTexValid := false;
@@ -502,8 +584,6 @@ begin
 
   fLoop := false;
   fLoopTime := 0;
-
-  fPboId := 0;
 
   fAspectCorrection := acoCrop;
 
@@ -556,8 +636,11 @@ begin
   fCodecContext  := nil;
   fFormatContext := nil;
 
-  if (fPboId <> 0) then
-    glDeleteBuffersARB(1, @fPboId);
+  if (fSwScaleContext <> nil) then
+  begin
+    sws_freeContext(fSwScaleContext);
+    fSwScaleContext := nil;
+  end;
 
   fOpened := False;
 end;
@@ -566,18 +649,25 @@ procedure TVideo_FFmpeg.SynchronizeTime(Frame: PAVFrame; pts: double);
 var
   FrameDelay: double;
 begin
+  // a frame starts where the previous one ended ...
+  fFrameTime := fNextFrameTime;
   if (pts <> 0) then
   begin
-    // if we have pts, set video clock to it
+    // ... unless we have a pts, then set the video clock to it
     fFrameTime := pts;
   end;
-  // update the video clock
+  // duration of this frame.
   // Note: the codec context's time_base is not set for contexts created from
-  // codec parameters, so we use the frame duration determined in Open().
-  FrameDelay := fFrameDuration;
+  // codec parameters. If there is no framerate either, we use the frame
+  // duration determined in Open().
+  if (fCodecContext^.framerate.num = 0) then
+    FrameDelay := fFrameDuration
+  else
+    FrameDelay := fCodecContext^.framerate.den / fCodecContext^.framerate.num;
   // if we are repeating a frame, adjust clock accordingly
   FrameDelay := FrameDelay + Frame^.repeat_pict * (FrameDelay * 0.5);
-  fFrameTime := fFrameTime + FrameDelay;
+  // update the video clock: position of the next frame
+  fNextFrameTime := fFrameTime + FrameDelay;
 end;
 
 {**
@@ -713,13 +803,11 @@ end;
 procedure TVideo_FFmpeg.GetFrame(Time: Extended);
 var
   errnum: Integer;
-  glErr: GLenum;
   CurrentTime: Extended;
   TimeDiff: Extended;
   DropFrameCount: Integer;
   i: Integer;
   Success: boolean;
-  BufferPtr: PGLvoid;
 const
   SKIP_FRAME_DIFF = 0.010; // start skipping if we are >= 10ms too late
 begin
@@ -837,6 +925,17 @@ begin
     ;
   end;
 
+  {$IF (LIBSWSCALE_VERSION_MAJOR < 8) or ((LIBSWSCALE_VERSION_MAJOR = 8) and (LIBSWSCALE_VERSION_MINOR < 3))}
+  {$IF DEFINED(CPUX86_64) or DEFINED(CPUX86)}
+  // Unscaled conversion with libswscale lacked the emms instruction.
+  // With FFmpeg 7.1 these mmx(ext) implementations have been removed.
+  asm
+    emms
+  end ['st(0)','st(1)','st(2)','st(3)','st(4)','st(5)','st(6)','st(7)',
+       'mm0','mm1','mm2','mm3','mm4','mm5','mm6','mm7'];
+  {$ENDIF}
+  {$IFEND}
+
   if (errnum < 0) then
   begin
     Log.LogError('Image conversion failed', 'TVideoPlayback_ffmpeg.GetFrame');
@@ -849,53 +948,14 @@ begin
   {$ENDIF}
 
 
-  // glTexEnvi with GL_REPLACE might give a small speed improvement
-  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+  // upload the converted frame directly into the texture
+  glBindTexture(GL_TEXTURE_2D, fFrameTex);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, fAVFrameRGB.linesize[0] div PIXEL_FMT_SIZE);
-
-  if (not fPboEnabled) then
-  begin
-    glBindTexture(GL_TEXTURE_2D, fFrameTex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-        fCodecContext^.width, fCodecContext^.height,
-        PIXEL_FMT_OPENGL, GL_UNSIGNED_BYTE, fAVFrameRGB^.data[0]);
-  end
-  else // fPboEnabled
-  begin
-    glGetError();
-
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, fPboId);
-    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB,
-        fCodecContext^.height * fAVFrameRGB.linesize[0],
-        nil,
-        GL_STREAM_DRAW_ARB);
-
-    bufferPtr := glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY_ARB);
-    if(bufferPtr <> nil) then
-    begin
-      Move(fAVFrameRGB^.data[0]^, bufferPtr^,
-           fCodecContext^.height * fAVFrameRGB.linesize[0]);
-
-      // release pointer to mapping buffer
-      glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB);
-    end;
-
-    glBindTexture(GL_TEXTURE_2D, fFrameTex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-        fCodecContext^.width, fCodecContext^.height,
-        PIXEL_FMT_OPENGL, GL_UNSIGNED_BYTE, nil);
-
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    glErr := glGetError();
-    if (glErr <> GL_NO_ERROR) then
-      Log.LogError('PBO texture stream error: ' + gluErrorString(glErr), 'TVideo_FFmpeg.GetFrame');
-  end;
-
-  // reset to default
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+      fScaledWidth, fScaledHeight,
+      PIXEL_FMT_OPENGL, GL_UNSIGNED_BYTE, fAVFrameRGB^.data[0]);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  glBindTexture(GL_TEXTURE_2D, 0);
 
   if (not fFrameTexValid) then
     fFrameTexValid := true;
@@ -964,10 +1024,10 @@ begin
 
   // texture contains right/lower (power-of-2) padding.
   // Determine the texture coords of the video frame.
-  TexRect.Left  := (fCodecContext^.width / fTexWidth) * fFrameRange.Left;
-  TexRect.Right := (fCodecContext^.width / fTexWidth) * fFrameRange.Right;
-  TexRect.Upper := (fCodecContext^.height / fTexHeight) * fFrameRange.Upper;
-  TexRect.Lower := (fCodecContext^.height / fTexHeight) * fFrameRange.Lower;
+  TexRect.Left  := (fScaledWidth / fTexWidth) * fFrameRange.Left;
+  TexRect.Right := (fScaledWidth / fTexWidth) * fFrameRange.Right;
+  TexRect.Upper := (fScaledHeight / fTexHeight) * fFrameRange.Upper;
+  TexRect.Lower := (fScaledHeight / fTexHeight) * fFrameRange.Lower;
 end;
 
 procedure TVideo_FFmpeg.DrawBorders(ScreenRect: TRectCoords);
@@ -1044,6 +1104,281 @@ begin
 end;
 
 
+{**
+ * Creates the vertex buffer used for drawing. If this is not possible (or
+ * VideoLegacyDraw is defined) the old immediate mode code is used instead.
+ *}
+procedure TVideo_FFmpeg.InitVertexBuffer();
+begin
+  fUseVBO := false;
+  fVBO := 0;
+  fVBOCursor := 0;
+  fVBOBase := 0;
+  fVertCount := 0;
+
+  {$IFNDEF VideoLegacyDraw}
+  if (not (Assigned(glGenBuffers) and Assigned(glBindBuffer) and
+           Assigned(glBufferData) and Assigned(glBufferSubData) and
+           Assigned(glDeleteBuffers))) then
+    Exit;
+
+  glGetError(); // clear previous errors
+  glGenBuffers(1, @fVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, fVBO);
+  glBufferData(GL_ARRAY_BUFFER, VBO_SIZE, nil, GL_STREAM_DRAW);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+  if (glGetError() <> GL_NO_ERROR) then
+  begin
+    Log.LogError('Vertex buffer initialization failed, using immediate mode', 'TVideo_FFmpeg.InitVertexBuffer');
+    if (fVBO <> 0) then
+      glDeleteBuffers(1, @fVBO);
+    fVBO := 0;
+    Exit;
+  end;
+
+  fUseVBO := true;
+  {$ENDIF}
+end;
+
+{**
+ * Compiles the shader used to draw from the vertex buffer.
+ * It reads the same inputs as the fixed function pipeline (vertex, color and
+ * texture coordinates from the vertex arrays, the current matrices via
+ * ftransform()) and does the same calculation (texture * color), so the
+ * result is identical. If anything fails the fixed function pipeline is used.
+ *}
+procedure TVideo_FFmpeg.InitShader();
+{$IFNDEF VideoNoShader}
+const
+  VertexSource =
+    '#version 110' + #10 +
+    'void main()' + #10 +
+    '{' + #10 +
+    '  gl_Position = ftransform();' + #10 +
+    '  gl_FrontColor = gl_Color;' + #10 +
+    '  gl_TexCoord[0] = gl_MultiTexCoord0;' + #10 +
+    '}' + #10;
+
+  FragmentSource =
+    '#version 110' + #10 +
+    'uniform sampler2D tex;' + #10 +
+    'uniform float use_tex;' + #10 +
+    'void main()' + #10 +
+    '{' + #10 +
+    '  vec4 c = gl_Color;' + #10 +
+    '  if (use_tex > 0.5)' + #10 +
+    '    c = c * texture2D(tex, gl_TexCoord[0].xy);' + #10 +
+    '  gl_FragColor = c;' + #10 +
+    '}' + #10;
+var
+  VertexShader, FragmentShader: GLuint;
+  CompileResult: GLint;
+  ErrorBuf: array[0..511] of GLcharARB;
+
+  function CompileShader(ShaderType: GLenum; Source: string; Name: string): GLuint;
+  begin
+    Result := glCreateShader(ShaderType);
+    glShaderSource(Result, 1, PPGLcharARB(@Source), nil);
+    glCompileShader(Result);
+    glGetShaderiv(Result, GL_COMPILE_STATUS, @CompileResult);
+    if (ByteBool(CompileResult) = GL_FALSE) then
+    begin
+      glGetShaderInfoLog(Result, SizeOf(ErrorBuf), nil, @ErrorBuf[0]);
+      Log.LogError('Failed to compile ' + Name + ' shader: ' + ErrorBuf, 'TVideo_FFmpeg.InitShader');
+      glDeleteShader(Result);
+      Result := 0;
+    end;
+  end;
+{$ENDIF}
+begin
+  fUseShader := false;
+  fProg := 0;
+  fLocUseTex := -1;
+
+  {$IFNDEF VideoNoShader}
+  if (not fUseVBO) then
+    Exit;
+
+  if (not (Assigned(glCreateShader) and Assigned(glShaderSource) and
+           Assigned(glCompileShader) and Assigned(glGetShaderiv) and
+           Assigned(glGetShaderInfoLog) and Assigned(glDeleteShader) and
+           Assigned(glCreateProgram) and Assigned(glAttachShader) and
+           Assigned(glLinkProgram) and Assigned(glGetProgramiv) and
+           Assigned(glGetProgramInfoLog) and Assigned(glDeleteProgram) and
+           Assigned(glUseProgram) and Assigned(glGetUniformLocation) and
+           Assigned(glUniform1i) and Assigned(glUniform1f))) then
+    Exit;
+
+  VertexShader := CompileShader(GL_VERTEX_SHADER, VertexSource, 'vertex');
+  if (VertexShader = 0) then
+    Exit;
+  FragmentShader := CompileShader(GL_FRAGMENT_SHADER, FragmentSource, 'fragment');
+  if (FragmentShader = 0) then
+  begin
+    glDeleteShader(VertexShader);
+    Exit;
+  end;
+
+  fProg := glCreateProgram();
+  glAttachShader(fProg, VertexShader);
+  glAttachShader(fProg, FragmentShader);
+  glLinkProgram(fProg);
+  glDeleteShader(VertexShader);
+  glDeleteShader(FragmentShader);
+  glGetProgramiv(fProg, GL_LINK_STATUS, @CompileResult);
+  if (ByteBool(CompileResult) = GL_FALSE) then
+  begin
+    glGetProgramInfoLog(fProg, SizeOf(ErrorBuf), nil, @ErrorBuf[0]);
+    Log.LogError('Failed to link video shader: ' + ErrorBuf, 'TVideo_FFmpeg.InitShader');
+    glDeleteProgram(fProg);
+    fProg := 0;
+    Exit;
+  end;
+
+  fLocUseTex := glGetUniformLocation(fProg, 'use_tex');
+  glUseProgram(fProg);
+  glUniform1i(glGetUniformLocation(fProg, 'tex'), 0); // texture unit 0
+  glUseProgram(0);
+
+  fUseShader := true;
+  {$ENDIF}
+end;
+
+procedure TVideo_FFmpeg.AddVertex(aX, aY, aZ, aR, aG, aB, aA, aU, aV: single);
+begin
+  if (fVertCount >= MAX_VERTICES) then
+    Exit;
+  fVerts[fVertCount].X := aX;
+  fVerts[fVertCount].Y := aY;
+  fVerts[fVertCount].Z := aZ;
+  fVerts[fVertCount].R := aR;
+  fVerts[fVertCount].G := aG;
+  fVerts[fVertCount].B := aB;
+  fVerts[fVertCount].A := aA;
+  fVerts[fVertCount].U := aU;
+  fVerts[fVertCount].V := aV;
+  Inc(fVertCount);
+end;
+
+// black quad, the alpha value may differ between upper and lower edge
+procedure TVideo_FFmpeg.AddBorderQuad(Left, Right, Upper, Lower, AlphaUpper, AlphaLower: single);
+begin
+  AddVertex(Left,  Upper, fPosZ, 0, 0, 0, AlphaUpper, 0, 0);
+  AddVertex(Right, Upper, fPosZ, 0, 0, 0, AlphaUpper, 0, 0);
+  AddVertex(Right, Lower, fPosZ, 0, 0, 0, AlphaLower, 0, 0);
+  AddVertex(Left,  Lower, fPosZ, 0, 0, 0, AlphaLower, 0, 0);
+end;
+
+procedure TVideo_FFmpeg.AddBorders(ScreenRect: TRectCoords);
+begin
+  //upper border
+  if(ScreenRect.Upper > fPosY) then
+    AddBorderQuad(fPosX, fPosX+fWidth, fPosY, ScreenRect.Upper, fAlpha, fAlpha);
+
+  //lower border
+  if(ScreenRect.Lower < fPosY+fHeight) then
+    AddBorderQuad(fPosX, fPosX+fWidth, ScreenRect.Lower, fPosY+fHeight, fAlpha, fAlpha);
+
+  //left border
+  if(ScreenRect.Left > fPosX) then
+    AddBorderQuad(fPosX, ScreenRect.Left, fPosY, fPosY+fHeight, fAlpha, fAlpha);
+
+  //right border
+  if(ScreenRect.Right < fPosX+fWidth) then
+    AddBorderQuad(ScreenRect.Right, fPosX+fWidth, fPosY, fPosY+fHeight, fAlpha, fAlpha);
+end;
+
+procedure TVideo_FFmpeg.AddBordersReflected(ScreenRect: TRectCoords; AlphaUpper, AlphaLower: double);
+var
+  rPosUpper, rPosLower: double;
+
+  procedure AddRect(left, right, upper, lower: double);
+  var
+    AlphaTop: double;
+    AlphaBottom: double;
+  begin
+    AlphaTop := AlphaUpper+(AlphaLower-AlphaUpper)*(upper-rPosUpper)/(fHeight*ReflectionH);
+    AlphaBottom := AlphaLower+(AlphaUpper-AlphaLower)*(rPosLower-lower)/(fHeight*ReflectionH);
+    AddBorderQuad(left, right, upper, lower, AlphaTop, AlphaBottom);
+  end;
+begin
+  rPosUpper := fPosY+fHeight+fReflectionSpacing;
+  rPosLower := rPosUpper+fHeight*ReflectionH;
+
+  //upper border
+  if(ScreenRect.Upper > rPosUpper) then
+    AddRect(fPosX, fPosX+fWidth, rPosUpper, ScreenRect.Upper);
+
+  //lower border
+  if(ScreenRect.Lower < rPosLower) then
+    AddRect(fPosX, fPosX+fWidth, ScreenRect.Lower, rPosLower);
+
+  //left border
+  if(ScreenRect.Left > fPosX) then
+    AddRect(fPosX, ScreenRect.Left, rPosUpper, rPosLower);
+
+  //right border
+  if(ScreenRect.Right < fPosX+fWidth) then
+    AddRect(ScreenRect.Right, fPosX+fWidth, rPosUpper, rPosLower);
+end;
+
+{**
+ * Writes the collected vertices into the vertex buffer.
+ * The buffer is used like a ring buffer: new vertices are written behind the
+ * previous ones. When the end is reached the old storage is orphaned and we
+ * start at the beginning again, so we never overwrite data the GPU may still
+ * be reading.
+ *}
+procedure TVideo_FFmpeg.UploadVertices();
+var
+  Bytes: integer;
+begin
+  Bytes := fVertCount * VERTEX_BYTES;
+  glBindBuffer(GL_ARRAY_BUFFER, fVBO);
+  if (fVBOCursor + Bytes > VBO_SIZE) then
+  begin
+    glBufferData(GL_ARRAY_BUFFER, VBO_SIZE, nil, GL_STREAM_DRAW);
+    fVBOCursor := 0;
+  end;
+  glBufferSubData(GL_ARRAY_BUFFER, fVBOCursor, Bytes, @fVerts[0]);
+  fVBOBase := fVBOCursor;
+  fVBOCursor := fVBOCursor + Bytes;
+end;
+
+// draws Count vertices (quads), beginning with vertex First of the last upload
+procedure TVideo_FFmpeg.DrawVertices(First, Count: integer; Textured: boolean);
+begin
+  if (fUseShader) then
+  begin
+    glUseProgram(fProg);
+    if (Textured) then
+      glUniform1f(fLocUseTex, 1.0)
+    else
+      glUniform1f(fLocUseTex, 0.0);
+  end;
+
+  glEnableClientState(GL_VERTEX_ARRAY);
+  glEnableClientState(GL_COLOR_ARRAY);
+  glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+  glVertexPointer(3, GL_FLOAT, VERTEX_BYTES, Pointer(PtrUInt(fVBOBase)));
+  glColorPointer(4, GL_FLOAT, VERTEX_BYTES, Pointer(PtrUInt(fVBOBase + 3 * SizeOf(GLfloat))));
+  glTexCoordPointer(2, GL_FLOAT, VERTEX_BYTES, Pointer(PtrUInt(fVBOBase + 7 * SizeOf(GLfloat))));
+  glDrawArrays(GL_QUADS, First, Count);
+end;
+
+// restores the state that was changed for drawing from the vertex buffer
+procedure TVideo_FFmpeg.EndVertexDraw();
+begin
+  glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+  glDisableClientState(GL_COLOR_ARRAY);
+  glDisableClientState(GL_VERTEX_ARRAY);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  if (fUseShader) then
+    glUseProgram(0);
+end;
+
+
 procedure TVideo_FFmpeg.Draw();
 var
   ScreenRect:   TRectCoords;
@@ -1079,29 +1414,61 @@ begin
   glDepthFunc(GL_LEQUAL);
   glEnable(GL_DEPTH_TEST);
 
-  glEnable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, fFrameTex);
-  glColor4f(1, 1, 1, fAlpha);
-  glBegin(GL_QUADS);
+  if (fUseVBO) then
+  begin
+    // the video frame and the black borders are written into the vertex
+    // buffer with one upload. The first 4 vertices are the video frame.
+    fVertCount := 0;
     // upper-left coord
-    glTexCoord2f(TexRect.Left, TexRect.Upper);
-    glVertex3f(ScreenRect.Left, ScreenRect.Upper, fPosZ);
+    AddVertex(ScreenRect.Left, ScreenRect.Upper, fPosZ, 1, 1, 1, fAlpha, TexRect.Left, TexRect.Upper);
     // lower-left coord
-    glTexCoord2f(TexRect.Left, TexRect.Lower);
-    glVertex3f(ScreenRect.Left, ScreenRect.Lower, fPosZ);
+    AddVertex(ScreenRect.Left, ScreenRect.Lower, fPosZ, 1, 1, 1, fAlpha, TexRect.Left, TexRect.Lower);
     // lower-right coord
-    glTexCoord2f(TexRect.Right, TexRect.Lower);
-    glVertex3f(ScreenRect.Right, ScreenRect.Lower, fPosZ);
+    AddVertex(ScreenRect.Right, ScreenRect.Lower, fPosZ, 1, 1, 1, fAlpha, TexRect.Right, TexRect.Lower);
     // upper-right coord
-    glTexCoord2f(TexRect.Right, TexRect.Upper);
-    glVertex3f(ScreenRect.Right, ScreenRect.Upper, fPosZ);
-  glEnd;
+    AddVertex(ScreenRect.Right, ScreenRect.Upper, fPosZ, 1, 1, 1, fAlpha, TexRect.Right, TexRect.Upper);
+    AddBorders(ScreenRect);
 
-  glDisable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, 0);
+    UploadVertices();
 
-  //draw black borders
-  DrawBorders(ScreenRect);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, fFrameTex);
+    DrawVertices(0, 4, true);
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    //draw black borders
+    if (fVertCount > 4) then
+      DrawVertices(4, fVertCount - 4, false);
+
+    EndVertexDraw();
+  end
+  else
+  begin
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, fFrameTex);
+    glColor4f(1, 1, 1, fAlpha);
+    glBegin(GL_QUADS);
+      // upper-left coord
+      glTexCoord2f(TexRect.Left, TexRect.Upper);
+      glVertex3f(ScreenRect.Left, ScreenRect.Upper, fPosZ);
+      // lower-left coord
+      glTexCoord2f(TexRect.Left, TexRect.Lower);
+      glVertex3f(ScreenRect.Left, ScreenRect.Lower, fPosZ);
+      // lower-right coord
+      glTexCoord2f(TexRect.Right, TexRect.Lower);
+      glVertex3f(ScreenRect.Right, ScreenRect.Lower, fPosZ);
+      // upper-right coord
+      glTexCoord2f(TexRect.Right, TexRect.Upper);
+      glVertex3f(ScreenRect.Right, ScreenRect.Upper, fPosZ);
+    glEnd;
+
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    //draw black borders
+    DrawBorders(ScreenRect);
+  end;
 
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
@@ -1155,8 +1522,6 @@ begin
   glEnable(GL_DEPTH_TEST);
 
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glEnable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, fFrameTex);
 
   //calculate new ScreenRect coordinates for Reflection
   ScreenRect.Lower := fPosY + fHeight + fReflectionSpacing
@@ -1172,33 +1537,71 @@ begin
   AlphaBottom := AlphaLower+(AlphaUpper-AlphaLower)*
     (fPosY+fHeight+fReflectionSpacing+fHeight*ReflectionH-ScreenRect.Lower)/fHeight;
 
-  glBegin(GL_QUADS);
+  if (fUseVBO) then
+  begin
+    // reflected video frame (first 4 vertices) followed by the black borders
+    fVertCount := 0;
     //Top Left
-    glColor4f(1, 1, 1, AlphaTop);
-    glTexCoord2f(TexRect.Left, TexRect.Lower);
-    glVertex3f(ScreenRect.Left, ScreenRect.Upper, fPosZ);
-
+    AddVertex(ScreenRect.Left, ScreenRect.Upper, fPosZ, 1, 1, 1, AlphaTop,
+              TexRect.Left, TexRect.Lower);
     //Bottom Left
-    glColor4f(1, 1, 1, AlphaBottom);
-    glTexCoord2f(TexRect.Left, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
-    glVertex3f(ScreenRect.Left, ScreenRect.Lower, fPosZ);
-
+    AddVertex(ScreenRect.Left, ScreenRect.Lower, fPosZ, 1, 1, 1, AlphaBottom,
+              TexRect.Left, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
     //Bottom Right
-    glColor4f(1, 1, 1, AlphaBottom);
-    glTexCoord2f(TexRect.Right, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
-    glVertex3f(ScreenRect.Right, ScreenRect.Lower, fPosZ);
-
+    AddVertex(ScreenRect.Right, ScreenRect.Lower, fPosZ, 1, 1, 1, AlphaBottom,
+              TexRect.Right, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
     //Top Right
-    glColor4f(1, 1, 1, AlphaTop);
-    glTexCoord2f(TexRect.Right, TexRect.Lower);
-    glVertex3f(ScreenRect.Right, ScreenRect.Upper, fPosZ);
-  glEnd;
+    AddVertex(ScreenRect.Right, ScreenRect.Upper, fPosZ, 1, 1, 1, AlphaTop,
+              TexRect.Right, TexRect.Lower);
+    AddBordersReflected(ScreenRect, AlphaUpper, AlphaLower);
 
-  glDisable(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, 0);
+    UploadVertices();
 
-  //draw black borders
-  DrawBordersReflected(ScreenRect, AlphaUpper, AlphaLower);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, fFrameTex);
+    DrawVertices(0, 4, true);
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    //draw black borders
+    if (fVertCount > 4) then
+      DrawVertices(4, fVertCount - 4, false);
+
+    EndVertexDraw();
+  end
+  else
+  begin
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, fFrameTex);
+
+    glBegin(GL_QUADS);
+      //Top Left
+      glColor4f(1, 1, 1, AlphaTop);
+      glTexCoord2f(TexRect.Left, TexRect.Lower);
+      glVertex3f(ScreenRect.Left, ScreenRect.Upper, fPosZ);
+
+      //Bottom Left
+      glColor4f(1, 1, 1, AlphaBottom);
+      glTexCoord2f(TexRect.Left, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
+      glVertex3f(ScreenRect.Left, ScreenRect.Lower, fPosZ);
+
+      //Bottom Right
+      glColor4f(1, 1, 1, AlphaBottom);
+      glTexCoord2f(TexRect.Right, (TexRect.Lower-TexRect.Upper)*(1-ReflectionH));
+      glVertex3f(ScreenRect.Right, ScreenRect.Lower, fPosZ);
+
+      //Top Right
+      glColor4f(1, 1, 1, AlphaTop);
+      glTexCoord2f(TexRect.Right, TexRect.Lower);
+      glVertex3f(ScreenRect.Right, ScreenRect.Upper, fPosZ);
+    glEnd;
+
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    //draw black borders
+    DrawBordersReflected(ScreenRect, AlphaUpper, AlphaLower);
+  end;
 
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
@@ -1297,6 +1700,7 @@ begin
   SeekFlags := AVSEEK_FLAG_BACKWARD;
 
   fFrameTime := Time;
+  fNextFrameTime := Time;
   fEOF := false;
   fDraining := false;
   fFrameTexValid := false;
