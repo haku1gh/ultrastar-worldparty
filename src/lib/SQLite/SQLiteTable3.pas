@@ -114,7 +114,7 @@ type
     function GetRowsChanged: integer;
   protected
     procedure SetSynchronised(Value: boolean);
-    procedure DoQuery(value: string); 
+    procedure DoQuery(value: string);
   public
     constructor Create(const FileName: string);
     destructor Destroy; override;
@@ -319,7 +319,7 @@ begin
     self.Rollback;  //assume rollback
   if Assigned(fDB) then
     SQLite3_Close(fDB);
-  ParamsClear;    
+  ParamsClear;
   fParams.Free;
   inherited;
 end;
@@ -475,10 +475,10 @@ begin
           if (sqlite3_bind_blob(stmt, I+1, DataPtr, DataSize, @DisposePointer) <> SQLITE_OK) then
             RaiseError('Could not bind BLOB', 'BindData');
         end
-        else             
+        else
           raise ESqliteException.Create('Unhandled object-type in binding');
       end
-      else 
+      else
       begin
         raise ESqliteException.Create('Unhandled binding');
       end;
@@ -764,7 +764,6 @@ function TSQLiteDatabase.ContainsColumn(Table: String; Column: String) : boolean
 var
   sql: string;
   ds: TSqliteTable;
-  i : integer;
 begin
   sql := 'PRAGMA TABLE_INFO('+Table+');';
   ds := self.GetTable(sql);
@@ -1497,4 +1496,3 @@ begin
 end;
 
 end.
-
