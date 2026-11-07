@@ -124,10 +124,10 @@ const
   (*
    * Current version of UltraStar WorldParty
    *)
-   USWP_VERSION_MAJOR   = 21;
-   USWP_VERSION_MINOR   = 2;
+   USWP_VERSION_MAJOR   = 26;
+   USWP_VERSION_MINOR   = 11;
    USWP_VERSION_RELEASE = '';
-   USWP_VERSION_STATE   = 'FFmpeg9 Edition';
+   USWP_VERSION_STATE   = 'Haku Edition';
    USWP_STRING = 'UltraStar WorldParty';
 
   (*
