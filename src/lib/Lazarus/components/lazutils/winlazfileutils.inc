@@ -169,6 +169,7 @@ begin
   { Load shfolder.dll using a full path, in order to prevent spoofing (Mantis #18185)
     Don't bother loading shell32.dll because shfolder.dll itself redirects SHGetFolderPath
     to shell32.dll whenever possible. }
+  FillChar(pathBuf, SizeOf(pathBuf), 0);
   pathLength:=GetSystemDirectory(pathBuf, MAX_PATH);
   if (pathLength>0) and (pathLength<MAX_PATH-14) then { 14=length('\shfolder.dll'#0) }
   begin
@@ -270,6 +271,7 @@ var
   WinFindData: WIN32_FIND_DATAW;
   {$ENDIF WINCE}
 begin
+  FillChar(WidePath, SizeOf(WidePath), 0);
   Result := FileName;
   {$IFnDEF WINCE}
   if (LowerCase(ExtractFileExt(FileName)) = '.lnk') then
@@ -315,6 +317,7 @@ begin
   //writeln('FileName = "',FileName,'"');
   //writeln('BaseDir  = "',BaseDir,'"');
 
+  CanUseBaseDir := True;
   Fn := FileName;
   //if Filename uses ExtendedLengthPath scheme then it cannot be expanded
   //AND it should not be altered by ForcePathDelims or ResolveDots

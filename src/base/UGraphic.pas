@@ -393,6 +393,7 @@ begin
 
   // If there is a resolution in Parameters, use it, else use the Ini value
   // check for a custom resolution (in the format of WIDTHxHEIGHT) or try validating ID from TIni
+  S := '';
   if ParseResolutionString(Params.CustomResolution, W, H) then
     Log.LogStatus(Format('Use custom resolution from Command line: %d x %d', [W, H]), 'SDL_SetVideoMode')
   else if Ini.GetResolution(Params.Resolution, S) and ParseResolutionString(S, W, H) then

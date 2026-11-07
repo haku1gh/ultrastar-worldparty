@@ -756,7 +756,7 @@ var
   DelimPos: integer;
   I: integer;
 begin
-  SetLength(Result, 0);
+  Result := nil;
 
   if (Length(Self.ToUTF8(true)) = 0) then
     Exit;

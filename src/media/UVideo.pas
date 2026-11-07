@@ -382,7 +382,7 @@ begin
     Exit;
   end;
 
-  fStream := PPAVStream(PtrUInt(fFormatContext^.streams) + fStreamIndex * Sizeof(pointer))^;
+  fStream := PPAVStream(PtrUInt(fFormatContext^.streams) + PtrUInt(fStreamIndex) * Sizeof(pointer))^;
   fPreferDTS := false;
   // workaround for FFmpeg bug #6560
   if (LeftStr(fFormatContext^.iformat^.name, 4) = 'mov,') or (fFormatContext^.iformat^.name = 'mov') then

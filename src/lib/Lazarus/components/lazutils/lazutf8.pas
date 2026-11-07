@@ -3335,6 +3335,8 @@ begin
     Count := Count1;
 
   i := 0;
+  B1 := 0;
+  B2 := 0;
   if (Count > 0) then
   begin
    //unfortunately we cannot use CompareByte here, so we have to iterate ourselves
@@ -3469,6 +3471,7 @@ var
 
   function InvalidCharError(Count: SizeUInt): Boolean; inline;
   begin
+    Result := False;
     if not (toInvalidCharError in Options) then
     begin
       if toInvalidCharToSymbol in Options then
@@ -3651,6 +3654,7 @@ var
 
   function InvalidCharError(Count: SizeUInt): Boolean; inline;
   begin
+    Result := False;
     if not (toInvalidCharError in Options) then
     begin
       if toInvalidCharToSymbol in Options then
@@ -3967,4 +3971,3 @@ finalization
   FinalizeLazUTF8;
 
 end.
-

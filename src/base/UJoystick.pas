@@ -501,7 +501,6 @@ end;
 destructor TJoy.Destroy;
 var
   i, index: integer;
-  Controller: TJoyController;
 begin
   inherited;
 

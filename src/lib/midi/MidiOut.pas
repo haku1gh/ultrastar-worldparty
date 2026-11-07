@@ -355,6 +355,7 @@ begin
     if not (csLoading in ComponentState) then
     begin
     { Loop uses -1 to test for MIDI_MAPPER as well }
+      testDeviceID := -1;
       for testDeviceID := -1 to (midioutGetNumDevs - 1) do
       begin
         FError :=
@@ -394,6 +395,7 @@ begin
   else
   begin
        { Loop uses -1 to test for MIDI_MAPPER as well }
+    testDeviceID := -1;
     for testDeviceID := -1 to (midiOutGetNumDevs - 1) do
     begin
       FError :=
@@ -606,4 +608,3 @@ begin
 end;
 
 end.
-

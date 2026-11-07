@@ -109,7 +109,4 @@ Step 6: Fix encountered smaller issues
   version is necessary.
 - DONE: Optimize FFmpeg video and shader drawing via OpenGL. This requires now
   OpenGL 2.0 support vs OpenGL 1.x support from the earlier implementation.
-- OPEN: Check if all the API definitions are really needed and if not, maybe
-  delete unused API's.
-- OPEN: There are >= 30 warnings in the code. Check each warning and correct
-  if possible.
+- DONE: Removed ~37 warnings and ~10 notes.

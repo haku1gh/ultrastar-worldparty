@@ -32,8 +32,8 @@
   You may retrieve the latest version of this file at the Delphi OpenGL
   Community home page, located at http://www.delphigl.com/
 
-  This Source Code Form is subject to the terms of the Mozilla Public License, 
-  v. 2.0. If a copy of the MPL was not distributed with this file, 
+  This Source Code Form is subject to the terms of the Mozilla Public License,
+  v. 2.0. If a copy of the MPL was not distributed with this file,
   You can obtain one at http://mozilla.org/MPL/2.0/.
 
   Software distributed under the License is distributed on an
@@ -20445,7 +20445,7 @@ begin
     if Layer > 0 then
       iLayerType := PFD_OVERLAY_PLANE
     else
-      iLayerType := Byte(PFD_UNDERLAY_PLANE);
+      iLayerType := Byte(PFD_UNDERLAY_PLANE and $FF);
   end;
 
   PixelFormat := ChoosePixelFormat(DC, @PFDescriptor);
@@ -20542,7 +20542,7 @@ begin
         if Layer > 0 then
           iLayerType := PFD_OVERLAY_PLANE
         else
-          iLayerType := Byte(PFD_UNDERLAY_PLANE);
+          iLayerType := Byte(PFD_UNDERLAY_PLANE and $FF);
     end;
 
   PixelFormat := ChoosePixelFormat(DC, @PFDescriptor);
@@ -20664,4 +20664,3 @@ initialization
 finalization
 
 end.
-

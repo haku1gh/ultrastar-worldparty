@@ -52,7 +52,7 @@ begin
   GetMem(argv,SizeOf(Pointer)*length(ArgsW));
   for i:=0 to length(ArgsW)-1 do
   begin
-    ArgsUTF8[i]:=ArgsW{%H-}[i];
+    ArgsUTF8[i]:=UTF8Encode(ArgsW{%H-}[i]);
     argv[i]:=PChar(ArgsUTF8[i]);
   end;
 end;
@@ -422,6 +422,7 @@ var
   L: Integer;
   Buf: array[0..255] of WideChar;
 begin
+  FillChar(Buf, SizeOf(Buf), 0);
   L := GetLocaleInfoW(aLocaleID, aLCType, Buf, SizeOf(Buf));
   if L > 0 then
   begin
@@ -438,6 +439,8 @@ var
   GLI, I: LongInt;
   WRes: WideChar;
 begin
+  FillChar(Buf, SizeOf(Buf), 0);
+  WRes := Def;
   //Use Widestring Api so it works on WinCE as well
   GLI := GetLocaleInfoW(aLocaleID, aLCType, Buf, Length(Buf)); // GLI is char count with the ending #0 char
   if GLI > 2 then

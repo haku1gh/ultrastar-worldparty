@@ -450,6 +450,9 @@ begin
   else
   begin
     Result := '[-------]';
+    {$PUSH}
+    {$WARN SYMBOL_PLATFORM OFF}
+    {$WARN SYMBOL_DEPRECATED OFF}
     if (faDirectory and Attr) > 0 then Result[2] := 'D';
     if (faArchive and Attr)   > 0 then Result[3] := 'A';
     if (faSysFile{%H-} and Attr)   > 0 then Result[4] := 'S';
@@ -457,6 +460,6 @@ begin
     if (faHidden{%H-} and Attr)    > 0 then Result[6] := 'H';
     if (faVolumeId{%H-} and Attr)  > 0 then Result[7] := 'V';
     if (faSymLink{%H-} and Attr)   > 0 then Result[8] := 'L';
+    {$POP}
   end;
 end;
-

@@ -513,10 +513,8 @@ begin
             end;
 
 			SimKey :=0;
-            if((Event.key.keysym.sym > Low(LongWord)) and (Event.key.keysym.sym < High(LongWord))) then
-            begin
+            if Event.key.keysym.sym > 0 then
               SimKey := Event.key.keysym.sym;
-            end;
 
             // if print is pressed -> make screenshot and save to screenshot path
             if (SimKey = SDLK_SYSREQ) or (SimKey = SDLK_PRINTSCREEN) then
@@ -603,6 +601,7 @@ procedure MainThreadExec(Proc: TMainThreadExecProc; Data: Pointer);
 var
   Event: TSDL_Event;
 begin
+  FillChar(Event, SizeOf(Event), 0);
   with Event.user do
   begin
     type_ := MAINTHREAD_EXEC_EVENT;

@@ -1995,7 +1995,7 @@ begin
       end;
     end;
 
-    Self.Text[Self.TextWebsite].text := UTF8Decode('UltraStar España'); //FIXME use the constant
+    Self.Text[Self.TextWebsite].text := 'UltraStar España'; //FIXME use the constant
     if (UIni.Ini.ShowScores > 0) and (Self.Mode = smNormal) and (not Song.isDuet) then //show scores
     begin
       Self.Text[Self.TextLocalScore1].Text := IntToStr(UDataBase.DataBase.ReadMaxScoreLocal(Song.Artist, Song.Title, 0));
@@ -2052,6 +2052,7 @@ var
   Position: integer;
 begin
   Position := 0;
+  Caption := '';
   case Filter of
     sfCategory:
       Caption := USongs.CatSongs.Song[USongs.CatSongs.ShowCategory(StrToInt(Id))].Artist;
@@ -2176,7 +2177,7 @@ var
   I:      integer;
 
 begin
-  SetLength(Result, 0);
+  Result := nil;
   if CatSongs.Song[Interaction].Main then
   begin
     for I := 0 to Length(CatSongs.Song) - 1 do

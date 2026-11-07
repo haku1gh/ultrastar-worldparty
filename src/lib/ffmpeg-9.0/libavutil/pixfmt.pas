@@ -146,7 +146,6 @@ type
     AV_PIX_FMT_YUV422P9BE,                   ///< planar YUV 4:2:2, 18bpp, (1 Cr & Cb sample per 2x1 Y samples), big-endian
     AV_PIX_FMT_YUV422P9LE,                   ///< planar YUV 4:2:2, 18bpp, (1 Cr & Cb sample per 2x1 Y samples), little-endian
     AV_PIX_FMT_GBRP,                         ///< planar GBR 4:4:4 24bpp
-    AV_PIX_FMT_GBR24P = AV_PIX_FMT_GBRP,     // alias for #AV_PIX_FMT_GBRP
     AV_PIX_FMT_GBRP9BE,                      ///< planar GBR 4:4:4 27bpp, big-endian
     AV_PIX_FMT_GBRP9LE,                      ///< planar GBR 4:4:4 27bpp, little-endian
     AV_PIX_FMT_GBRP10BE,                     ///< planar GBR 4:4:4 30bpp, big-endian
@@ -346,8 +345,9 @@ type
   );
 
 const
-    AV_PIX_FMT_Y400A = AV_PIX_FMT_YA8; ///< alias for AV_PIX_FMT_YA8
-    AV_PIX_FMT_GRAY8A= AV_PIX_FMT_YA8; ///< alias for AV_PIX_FMT_YA8
+    AV_PIX_FMT_Y400A = AV_PIX_FMT_YA8;   ///< alias for AV_PIX_FMT_YA8
+    AV_PIX_FMT_GRAY8A= AV_PIX_FMT_YA8;   ///< alias for AV_PIX_FMT_YA8
+    AV_PIX_FMT_GBR24P = AV_PIX_FMT_GBRP; ///< alias for #AV_PIX_FMT_GBRP
 
 {$IFDEF WORDS_BIGENDIAN}
     AV_PIX_FMT_RGB32   = AV_PIX_FMT_ARGB;
@@ -517,13 +517,16 @@ type
     AVCOL_PRI_FILM        = 8, ///< colour filters using Illuminant C
     AVCOL_PRI_BT2020      = 9, ///< ITU-R BT2020
     AVCOL_PRI_SMPTE428    = 10, ///< SMPTE ST 428-1 (CIE 1931 XYZ)
-    AVCOL_PRI_SMPTEST428_1 = AVCOL_PRI_SMPTE428,
     AVCOL_PRI_SMPTE431    = 11, ///< SMPTE ST 431-2 (2011) / DCI P3
     AVCOL_PRI_SMPTE432    = 12, ///< SMPTE ST 432-1 (2010) / P3 D65 / Display P3
     AVCOL_PRI_JEDEC_P22   = 22, ///< JEDEC P22 phosphors
     AVCOL_PRI_NB                ///< Not part of ABI
   );
 
+const
+    AVCOL_PRI_SMPTEST428_1 = AVCOL_PRI_SMPTE428;   ///< alias for AVCOL_PRI_SMPTE428
+
+type
 (**
  * Color Transfer Characteristic.
  * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.2.
@@ -546,13 +549,16 @@ type
     AVCOL_TRC_BT2020_10    = 14, ///< ITU-R BT2020 for 10-bit system
     AVCOL_TRC_BT2020_12    = 15, ///< ITU-R BT2020 for 12-bit system
     AVCOL_TRC_SMPTE2084    = 16, ///< SMPTE ST 2084 for 10-, 12-, 14- and 16-bit systems
-    AVCOL_TRC_SMPTEST2084  = AVCOL_TRC_SMPTE2084,
     AVCOL_TRC_SMPTE428     = 17, ///< SMPTE ST 428-1
-    AVCOL_TRC_SMPTEST428_1 = AVCOL_TRC_SMPTE428,
     AVCOL_TRC_ARIB_STD_B67 = 18, ///< ARIB STD-B67, known as "Hybrid log-gamma"
     AVCOL_TRC_NB                 ///< Not part of ABI
   );
 
+const
+    AVCOL_TRC_SMPTEST2084  = AVCOL_TRC_SMPTE2084;   ///< alias for AVCOL_TRC_SMPTE2084
+    AVCOL_TRC_SMPTEST428_1 = AVCOL_TRC_SMPTE428;    ///< alias for AVCOL_TRC_SMPTE428
+
+type
 (**
  * YUV colorspace type.
  * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.3.
@@ -567,7 +573,6 @@ type
     AVCOL_SPC_SMPTE170M   = 6,  ///< also ITU-R BT601-6 525 / ITU-R BT1358 525 / ITU-R BT1700 NTSC
     AVCOL_SPC_SMPTE240M   = 7,  ///< functionally identical to above
     AVCOL_SPC_YCGCO       = 8,  ///< Used by Dirac / VC-2 and H.264 FRext, see ITU-T SG16
-    AVCOL_SPC_YCOCG       = AVCOL_SPC_YCGCO,
     AVCOL_SPC_BT2020_NCL  = 9,  ///< ITU-R BT2020 non-constant luminance system
     AVCOL_SPC_BT2020_CL   = 10, ///< ITU-R BT2020 constant luminance system
     AVCOL_SPC_SMPTE2085   = 11, ///< SMPTE 2085, Y'D'zD'x
@@ -576,6 +581,9 @@ type
     AVCOL_SPC_ICTCP       = 14, ///< ITU-R BT.2100-0, ICtCp
     AVCOL_SPC_NB                ///< Not part of ABI
   );
+
+const
+    AVCOL_SPC_YCOCG       = AVCOL_SPC_YCGCO;   ///< alias for AVCOL_SPC_YCGCO
 
 type
 (**

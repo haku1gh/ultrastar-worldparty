@@ -158,7 +158,7 @@ var
   ActTex: GLuint;
 begin
   // zero texture data
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TTexture);
 
   if (Identifier = nil) or (Identifier.IsUnset()) then
     Exit;

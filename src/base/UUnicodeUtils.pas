@@ -1,8 +1,8 @@
 {*
     UltraStar WorldParty - Karaoke Game
-	
-	UltraStar WorldParty is the legal property of its developers, 
-	whose names	are too numerous to list here. Please refer to the 
+
+	UltraStar WorldParty is the legal property of its developers,
+	whose names	are too numerous to list here. Please refer to the
 	COPYRIGHT file distributed with this source distribution.
 
     This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program. Check "LICENSE" file. If not, see 
+    along with this program. Check "LICENSE" file. If not, see
 	<http://www.gnu.org/licenses/>.
  *}
 
@@ -176,7 +176,7 @@ function UCS4Copy(const str: UCS4String; Index: Integer = 0; Count: Integer = -1
  * Note that characters in UTF-16 might consist of one or two WideChar valus
  * (see surrogates). So instead of using WideStringUpperCase(ch)[1] for single
  * character access, convert to UCS-4 where each character is represented by
- * one UCS4Char. 
+ * one UCS4Char.
  *)
 function WideStringUpperCase(const str: WideString) : WideString; overload;
 function WideStringUpperCase(ch: WideChar): WideString; overload;
@@ -438,7 +438,7 @@ begin
       Result := false;
       Exit;
     end;
-  end;    
+  end;
   Result := true;
 end;
 
@@ -532,6 +532,7 @@ end;
 
 function UCS4CharToString(ch: UCS4Char): UCS4String;
 begin
+  Result := nil;
   SetLength(Result, 2);
   Result[0] := ch;
   Result[1] := 0;
@@ -561,6 +562,7 @@ begin
     Count := MaxCount;
 
   // copy (and add zero terminator)
+  Result := nil;
   SetLength(Result, Count + 1);
   for I := 0 to Count-1 do
     Result[I] := str[Index+I];
@@ -587,7 +589,7 @@ begin
     Exit;
   if (Index + Count > Len) then
     Count := Len-Index;
-  
+
   OldStr := Str;
   SetLength(Str, Len-Count+1);
   for I := 0 to Index-1 do
@@ -606,7 +608,7 @@ begin
   // character is accessed with Result[1].
   // We cannot catch this error in the WideString parameter variant as the string
   // has length 0 already.
-  
+
   // Force min. string length of 1
   if (ch = #0) then
     Result := #0

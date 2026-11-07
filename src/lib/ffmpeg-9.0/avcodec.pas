@@ -399,7 +399,6 @@ type
     AV_CODEC_ID_ANM,
     AV_CODEC_ID_BINKVIDEO,
     AV_CODEC_ID_IFF_ILBM,
-    AV_CODEC_ID_IFF_BYTERUN1 = AV_CODEC_ID_IFF_ILBM,
     AV_CODEC_ID_KGV1,
     AV_CODEC_ID_YOP,
     AV_CODEC_ID_VP8,
@@ -494,7 +493,6 @@ type
     AV_CODEC_ID_FITS,
 
     //* various PCM "codecs" */
-    AV_CODEC_ID_FIRST_AUDIO = $10000,     ///< A dummy id pointing at the start of audio codecs
     AV_CODEC_ID_PCM_S16LE = $10000,
     AV_CODEC_ID_PCM_S16BE,
     AV_CODEC_ID_PCM_U16LE,
@@ -683,7 +681,6 @@ type
     AV_CODEC_ID_SBC,
 
     //* subtitle codecs */
-    AV_CODEC_ID_FIRST_SUBTITLE = $17000,          ///< A dummy ID pointing at the start of subtitle codecs.
     AV_CODEC_ID_DVD_SUBTITLE   = $17000,
     AV_CODEC_ID_DVB_SUBTITLE,
     AV_CODEC_ID_TEXT,  ///< raw UTF-8 text
@@ -710,7 +707,6 @@ type
     AV_CODEC_ID_HDMV_TEXT_SUBTITLE,
 
     //* other specific kind of codecs (generally used for attachments) */
-    AV_CODEC_ID_FIRST_UNKNOWN = $18000,           ///< A dummy ID pointing at the start of various fake codecs.
     AV_CODEC_ID_TTF = $18000,
 
     AV_CODEC_ID_SCTE_35, ///< Contain timestamp estimated through PCR of program stream.
@@ -737,6 +733,10 @@ type
   TCodecType = TAVMediaType;
 
 const
+  AV_CODEC_ID_IFF_BYTERUN1 = AV_CODEC_ID_IFF_ILBM;  ///< alias for AV_CODEC_ID_IFF_ILBM
+  AV_CODEC_ID_FIRST_AUDIO = $10000;                 ///< A dummy id pointing at the start of audio codecs
+  AV_CODEC_ID_FIRST_SUBTITLE = $17000;              ///< A dummy ID pointing at the start of subtitle codecs.
+  AV_CODEC_ID_FIRST_UNKNOWN = $18000;               ///< A dummy ID pointing at the start of various fake codecs.
   CODEC_TYPE_UNKNOWN    = AVMEDIA_TYPE_UNKNOWN;
   CODEC_TYPE_VIDEO      = AVMEDIA_TYPE_VIDEO;
   CODEC_TYPE_AUDIO      = AVMEDIA_TYPE_AUDIO;

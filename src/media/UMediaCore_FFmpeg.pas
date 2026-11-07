@@ -228,7 +228,7 @@ begin
 
   for i := 0 to FormatCtx.nb_streams-1 do
   begin
-    Stream := PPAVStream(PtrUInt(FormatCtx.streams) + i * Sizeof(pointer))^;
+    Stream := PPAVStream(PtrUInt(FormatCtx.streams) + PtrUInt(i) * Sizeof(pointer))^;
 
     if (Stream^.codecpar^.codec_type = AVMEDIA_TYPE_VIDEO) and
        (FirstVideoStream < 0) then
@@ -259,7 +259,7 @@ begin
 
   for i := 0 to FormatCtx^.nb_streams-1 do
   begin
-    Stream := PPAVStream(PtrUInt(FormatCtx^.streams) + i * Sizeof(pointer))^;
+    Stream := PPAVStream(PtrUInt(FormatCtx^.streams) + PtrUInt(i) * Sizeof(pointer))^;
 
     if (Stream^.codecpar^.codec_type = AVMEDIA_TYPE_AUDIO) then
     begin
