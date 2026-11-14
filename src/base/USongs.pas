@@ -84,6 +84,7 @@ type
     public
       constructor Create();
       destructor Destroy(); override;
+      procedure Stop(); //wakes up and ends the thread
       procedure AddSong(const TxtFile: IPath);
       function GetTxtParsed(): integer;
       function GetTxts(): TList;
@@ -97,13 +98,20 @@ type
       Threads: array of TSongsParse; //threads to parse songs
       Thread: integer; //current thread
       CoresAvailable: integer; //cores available for working threads
+      ForceScan: boolean; //true = ignore the song database and search the song directories
       procedure FindTxts(const Dir: IPath);
+      function CacheFileName(): UTF8String;
+      function LoadFromCache(): boolean;
+      procedure SaveToCache();
+      procedure FreeSongs();
+      procedure ScanDirs();
+      procedure PreloadAllCovers();
     protected
       procedure Execute; override;
     public
       SongList: TList; //array of songs
       Selected: integer; //selected song index
-      constructor Create();
+      constructor Create(AForceScan: boolean = false);
       destructor Destroy(); override;
       function GetLoadProgress(): TProgressSong;
       procedure PreloadCovers(Preload: boolean);
@@ -149,17 +157,253 @@ uses
   ULanguage,
   UMain,
   UNote,
+  SQLiteTable3,
   UPathUtils,
+  UTextEncoding,
   UUnicodeUtils;
+
+const
+  SONG_CACHE_VERSION = 1; // increase if the table layout or the TSong fields change
+
+type
+  TSongCache = class
+    private
+      DB: TSQLiteDatabase;
+      function GetMeta(const Key: UTF8String): UTF8String;
+      procedure SetMeta(const Key, Value: UTF8String);
+      function SongDirsSignature(): UTF8String;
+    public
+      constructor Create(const FileName: UTF8String);
+      destructor Destroy(); override;
+      // true if the cache was written with this version and for the same song directories
+      function IsValid(): boolean;
+      // appends TSong objects to List (owner of the objects is the caller!)
+      function Load(List: TList): boolean;
+      // replaces the whole cache content with the songs of List
+      procedure Save(List: TList);
+  end;
+
+const
+  cSongs = 'us_songcache';
+  cMeta  = 'us_songcache_meta';
+
+function PathToStr(const P: IPath): UTF8String;
+begin
+  if P.IsUnset() then
+    Result := ''
+  else
+    Result := P.ToUTF8();
+end;
+
+function StrToPath(const S: UTF8String): IPath;
+begin
+  if S = '' then
+    Result := PATH_NONE()
+  else
+    Result := UPath.Path(S);
+end;
+
+constructor TSongCache.Create(const FileName: UTF8String);
+begin
+  inherited Create();
+  Self.DB := TSQLiteDatabase.Create(FileName);
+
+  Self.DB.ExecSQL('CREATE TABLE IF NOT EXISTS [' + cMeta + '] (' +
+                    '[Key] TEXT PRIMARY KEY, ' +
+                    '[Value] TEXT NULL' +
+                  ');');
+
+  Self.DB.ExecSQL('CREATE TABLE IF NOT EXISTS [' + cSongs + '] (' +
+                    '[TxtFile] TEXT NOT NULL, ' +
+                    '[Title] TEXT NULL, ' +
+                    '[Artist] TEXT NULL, ' +
+                    '[TitleNoAccent] TEXT NULL, ' +
+                    '[ArtistNoAccent] TEXT NULL, ' +
+                    '[Genre] TEXT NULL, ' +
+                    '[Edition] TEXT NULL, ' +
+                    '[Language] TEXT NULL, ' +
+                    '[Year] INTEGER NULL, ' +
+                    '[Creator] TEXT NULL, ' +
+                    '[Fixer] TEXT NULL, ' +
+                    '[Mp3] TEXT NULL, ' +
+                    '[Cover] TEXT NULL, ' +
+                    '[Background] TEXT NULL, ' +
+                    '[Video] TEXT NULL, ' +
+                    '[VideoGAP] REAL NULL, ' +
+                    '[StartSec] REAL NULL, ' +
+                    '[Finish] INTEGER NULL, ' +
+                    '[BPM] REAL NULL, ' +
+                    '[GAP] REAL NULL, ' +
+                    '[Encoding] INTEGER NULL, ' +
+                    '[PreviewStart] REAL NULL, ' +
+                    '[MedleySource] INTEGER NULL, ' +
+                    '[MedleyStart] INTEGER NULL, ' +
+                    '[MedleyEnd] INTEGER NULL, ' +
+                    '[IsDuet] INTEGER NULL, ' +
+                    '[HasRap] INTEGER NULL, ' +
+                    '[DuetName1] TEXT NULL, ' +
+                    '[DuetName2] TEXT NULL, ' +
+                    '[MD5] TEXT NULL' +
+                  ');');
+end;
+
+destructor TSongCache.Destroy();
+begin
+  Self.DB.Free();
+  inherited;
+end;
+
+function TSongCache.GetMeta(const Key: UTF8String): UTF8String;
+begin
+  Result := Self.DB.GetTableString('SELECT [Value] FROM [' + cMeta + '] WHERE [Key] = ?', [Key]);
+end;
+
+procedure TSongCache.SetMeta(const Key, Value: UTF8String);
+begin
+  Self.DB.ExecSQL('INSERT OR REPLACE INTO [' + cMeta + '] ([Key], [Value]) VALUES (?, ?)', [Key, Value]);
+end;
+
+{ All configured song directories as one string. If the user changes the
+  directories in the ini file the cache is not valid anymore. }
+function TSongCache.SongDirsSignature(): UTF8String;
+var
+  I: integer;
+begin
+  Result := '';
+  for I := 0 to UPathUtils.SongPaths.Count - 1 do
+    Result := Result + IPath(UPathUtils.SongPaths[I]).ToUTF8() + '|';
+end;
+
+function TSongCache.IsValid(): boolean;
+begin
+  Result := (Self.GetMeta('version') = IntToStr(SONG_CACHE_VERSION)) and
+            (Self.GetMeta('songdirs') = Self.SongDirsSignature());
+end;
+
+function TSongCache.Load(List: TList): boolean;
+var
+  Table: TSQLiteUniTable;
+  Song: TSong;
+begin
+  Result := false;
+  if not Self.IsValid() then
+    Exit;
+
+  Table := Self.DB.GetUniTable(
+    'SELECT [TxtFile], [Title], [Artist], [TitleNoAccent], [ArtistNoAccent], ' +      // 0..4
+           '[Genre], [Edition], [Language], [Year], [Creator], [Fixer], ' +           // 5..10
+           '[Mp3], [Cover], [Background], [Video], ' +                                // 11..14
+           '[VideoGAP], [StartSec], [Finish], [BPM], [GAP], ' +                       // 15..19
+           '[Encoding], [PreviewStart], [MedleySource], [MedleyStart], [MedleyEnd], ' + // 20..24
+           '[IsDuet], [HasRap], [DuetName1], [DuetName2], [MD5] ' +                   // 25..29
+    'FROM [' + cSongs + ']');
+  try
+    while not Table.EOF do
+    begin
+      // sets Path, FileName, FullPath and Folder (category) from the txt filename
+      Song := TSong.Create(UPath.Path(Table.FieldAsString(0)));
+      List.Add(Song);
+
+      Song.Title          := Table.FieldAsString(1);
+      Song.Artist         := Table.FieldAsString(2);
+      Song.TitleNoAccent  := Table.FieldAsString(3);
+      Song.ArtistNoAccent := Table.FieldAsString(4);
+      Song.Genre          := Table.FieldAsString(5);
+      Song.Edition        := Table.FieldAsString(6);
+      Song.Language       := Table.FieldAsString(7);
+      Song.Year           := Integer(Table.FieldAsInteger(8));
+      Song.Creator        := Table.FieldAsString(9);
+      Song.Fixer          := Table.FieldAsString(10);
+      Song.Mp3            := StrToPath(Table.FieldAsString(11));
+      Song.Cover          := StrToPath(Table.FieldAsString(12));
+      Song.Background     := StrToPath(Table.FieldAsString(13));
+      Song.Video          := StrToPath(Table.FieldAsString(14));
+      Song.VideoGAP       := Table.FieldAsDouble(15);
+      Song.Start          := Table.FieldAsDouble(16);
+      Song.Finish         := Integer(Table.FieldAsInteger(17));
+      Song.BPM            := Table.FieldAsDouble(18);
+      Song.GAP            := Table.FieldAsDouble(19);
+      Song.Encoding       := TEncoding(Integer(Table.FieldAsInteger(20)));
+      Song.PreviewStart   := Table.FieldAsDouble(21);
+      Song.Medley.Source    := TMedleySource(Integer(Table.FieldAsInteger(22)));
+      Song.Medley.StartBeat := Integer(Table.FieldAsInteger(23));
+      Song.Medley.EndBeat   := Integer(Table.FieldAsInteger(24));
+      Song.isDuet         := Table.FieldAsInteger(25) <> 0;
+      Song.hasRap         := Table.FieldAsInteger(26) <> 0;
+      Song.DuetNames[0]   := Table.FieldAsString(27);
+      Song.DuetNames[1]   := Table.FieldAsString(28);
+      Song.MD5            := Table.FieldAsString(29);
+      Song.Validated      := true;
+
+      Table.Next();
+    end;
+  finally
+    Table.Free();
+  end;
+
+  Result := List.Count > 0;
+end;
+
+procedure TSongCache.Save(List: TList);
+var
+  I: integer;
+  Song: TSong;
+begin
+  Self.DB.BeginTransaction();
+  try
+    Self.DB.ExecSQL('DELETE FROM [' + cSongs + ']');
+
+    for I := 0 to List.Count - 1 do
+    begin
+      Song := TSong(List[I]);
+      Self.DB.ExecSQL(
+        'INSERT INTO [' + cSongs + '] (' +
+          '[TxtFile], [Title], [Artist], [TitleNoAccent], [ArtistNoAccent], ' +
+          '[Genre], [Edition], [Language], [Year], [Creator], [Fixer], ' +
+          '[Mp3], [Cover], [Background], [Video], ' +
+          '[VideoGAP], [StartSec], [Finish], [BPM], [GAP], ' +
+          '[Encoding], [PreviewStart], [MedleySource], [MedleyStart], [MedleyEnd], ' +
+          '[IsDuet], [HasRap], [DuetName1], [DuetName2], [MD5]) ' +
+        'VALUES (?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?)',
+        [
+          PathToStr(Song.Path.Append(Song.FileName)),
+          Song.Title, Song.Artist, Song.TitleNoAccent, Song.ArtistNoAccent,
+          Song.Genre, Song.Edition, Song.Language, Song.Year, Song.Creator, Song.Fixer,
+          PathToStr(Song.Mp3), PathToStr(Song.Cover), PathToStr(Song.Background), PathToStr(Song.Video),
+          Song.VideoGAP, Song.Start, Song.Finish, Song.BPM, Song.GAP,
+          Ord(Song.Encoding), Song.PreviewStart, Ord(Song.Medley.Source), Song.Medley.StartBeat, Song.Medley.EndBeat,
+          Song.isDuet, Song.hasRap, Song.DuetNames[0], Song.DuetNames[1], Song.MD5
+        ]);
+    end;
+
+    Self.SetMeta('version', IntToStr(SONG_CACHE_VERSION));
+    Self.SetMeta('songdirs', Self.SongDirsSignature());
+    Self.DB.Commit();
+  except
+    Self.DB.Rollback();
+    raise;
+  end;
+
+  // SQLite does not give free space back to the file system after DELETE,
+  // so shrink the file (must be outside of a transaction)
+  try
+    Self.DB.ExecSQL('VACUUM');
+  except
+    on E: Exception do
+      ; // not critical, the file is only bigger than needed
+  end;
+end;
+
 
 constructor TSongsParse.Create();
 begin
-  inherited Create(false);
+  inherited Create(true); //suspended: the thread must not run before the fields exist
   Self.Event := RTLEventCreate();
   Self.FreeOnTerminate := true;
   Self.TxtParsed := 0;
   Self.Txts := TList.Create();
   Self.TxtsParsed := TList.Create();
+  Self.Start();
 end;
 
 destructor TSongsParse.Destroy();
@@ -168,6 +412,12 @@ begin
   Self.Txts.Free();
   Self.TxtsParsed.Free();
   inherited;
+end;
+
+procedure TSongsParse.Stop();
+begin
+  Self.Terminate();
+  RtlEventSetEvent(Self.Event); //otherwise the thread sleeps forever in RtlEventWaitFor
 end;
 
 procedure TSongsParse.Execute();
@@ -205,25 +455,24 @@ begin
   Result := Self.Txts;
 end;
 
-constructor TSongs.Create();
-var
-  I: integer;
+constructor TSongs.Create(AForceScan: boolean = false);
 begin
-  inherited Create(false);
+  inherited Create(true); //suspended: the thread must not run before the fields exist
   Self.Event := RTLEventCreate();
   Self.FreeOnTerminate := false;
+  Self.ForceScan := AForceScan;
   Self.SongList := TList.Create();
   Self.Thread := 0;
   Self.CoresAvailable := Max(0, CpuCount.GetLogicalCpuCount() - 2); //total core - main and songs threads
-  Setlength(Self.Threads, Self.CoresAvailable + 1);
-  for I := 0 to Self.CoresAvailable do
-    Self.Threads[I] := TSongsParse.Create();
+  Self.Start();
 end;
 
 destructor TSongs.Destroy();
 begin
+  Self.Terminate(); //stops a running cover preload
+  RtlEventSetEvent(Self.Event);
+  inherited; //waits for the thread
   RTLeventDestroy(Self.Event);
-  inherited;
 end;
 
 { Search for all files and directories }
@@ -253,57 +502,147 @@ begin
   end;
 end;
 
-{ Create a new thread to load songs and update main screen with progress }
-procedure TSongs.Execute();
+{ File of the song database (next to Ultrastar.db) }
+function TSongs.CacheFileName(): UTF8String;
+begin
+  Result := Platform.GetGameUserPath.Append('Ultrastar.songs.db').ToUTF8();
+end;
+
+{ Free songs which are not needed anymore (only used if the database is broken) }
+procedure TSongs.FreeSongs();
+var
+  I: integer;
+begin
+  for I := 0 to Self.SongList.Count - 1 do
+    TSong(Self.SongList.Items[I]).Free();
+  Self.SongList.Clear();
+end;
+
+{ Try to fill SongList from the database. Returns false if there is no valid database. }
+function TSongs.LoadFromCache(): boolean;
+var
+  Cache: TSongCache;
+begin
+  Result := false;
+  Log.BenchmarkStart(2);
+  try
+    Cache := TSongCache.Create(Self.CacheFileName());
+    try
+      Result := Cache.Load(Self.SongList);
+    finally
+      Cache.Free();
+    end;
+  except
+    on E: Exception do
+      Log.LogError('Song database could not be read: ' + E.Message, 'TSongs.LoadFromCache');
+  end;
+
+  if Result then
+  begin
+    Log.LogStatus('Loaded ' + IntToStr(Self.SongList.Count) + ' songs from database', 'SongList');
+    Self.ProgressSong.Total := Self.SongList.Count; //ScreenMain hides the error popup if Total > 0
+    Self.ProgressSong.Folder := '';
+    Self.ProgressSong.Finished := true;
+    Log.LogBenchmark('Song loading (database)', 2);
+  end
+  else
+    Self.FreeSongs(); //throw away partially loaded data
+end;
+
+{ Write SongList to the database }
+procedure TSongs.SaveToCache();
+var
+  Cache: TSongCache;
+begin
+  try
+    Cache := TSongCache.Create(Self.CacheFileName());
+    try
+      Cache.Save(Self.SongList);
+    finally
+      Cache.Free();
+    end;
+  except
+    on E: Exception do
+      Log.LogError('Song database could not be written: ' + E.Message, 'TSongs.SaveToCache');
+  end;
+end;
+
+{ Search the song directories, parse all txt files and store the result in the database }
+procedure TSongs.ScanDirs();
 var
   I, Processed: integer;
-  Song: TSong;
 begin
   Log.BenchmarkStart(2);
   Log.LogStatus('Searching for songs', 'SongList');
   Self.ProgressSong.Total := 0;
   Self.ProgressSong.Finished := false;
-  Self.ProgressSong.CoversPreload := true;
+
+  //parser threads are only needed for a scan
+  SetLength(Self.Threads, Self.CoresAvailable + 1);
+  for I := 0 to Self.CoresAvailable do
+    Self.Threads[I] := TSongsParse.Create();
+
   for I := 0 to UPathUtils.SongPaths.Count - 1 do //find txt files on directories and add songs
   begin
     Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.SongPaths[I]).ToNative()]);
     Self.FindTxts(IPath(UPathUtils.SongPaths[I]));
   end;
-  while not Self.ProgressSong.Finished do
-  begin
-    //wait a little to finish parsing last songs
+
+  repeat //wait a little to finish parsing last songs
     Processed := 0;
     for I := 0 to Self.CoresAvailable do
       Inc(Processed, Self.Threads[I].GetTxtParsed());
+    if Processed < Self.ProgressSong.Total then
+      Sleep(5);
+  until Processed >= Self.ProgressSong.Total;
 
-    if Processed = Self.ProgressSong.Total then
-    begin
-      for I := 0 to Self.CoresAvailable do
-      begin
-        Self.SongList.AddList(Self.Threads[I].GetTxts()); //add all songs parsed to main list
-        Self.Threads[I].Terminate();
-      end;
-
-      Log.LogStatus('Search complete: '+IntToStr(Processed)+' songs found ('+IntToStr(Processed - Self.SongList.Count)+' with errors)', 'SongList');
-      Self.ProgressSong.Folder := '';
-      Self.ProgressSong.Finished := true;
-      Log.LogBenchmark('Song loading', 2);
-
-      //preloading covers in HDD cache only touching the file
-      Log.BenchmarkStart(3);
-      Self.PreloadCover := true;
-      for I := 0 to Self.SongList.Count - 1 do
-      begin
-        Song := TSong(Self.SongList.Items[I]);
-        if not Self.PreloadCover then
-          RtlEventWaitFor(Self.Event);
-
-        SDL_FreeSurface(UImage.LoadImage(Song.Path.Append(Song.Cover)));
-      end;
-      Self.ProgressSong.CoversPreload := false;
-      Log.LogBenchmark('Cover loading', 3);
-    end;
+  for I := 0 to Self.CoresAvailable do
+  begin
+    Self.SongList.AddList(Self.Threads[I].GetTxts()); //add all songs parsed to main list
+    Self.Threads[I].Stop(); //the thread frees itself
   end;
+
+  Log.LogStatus('Search complete: '+IntToStr(Processed)+' songs found ('+IntToStr(Processed - Self.SongList.Count)+' with errors)', 'SongList');
+  Self.SaveToCache();
+  Self.ProgressSong.Folder := '';
+  Self.ProgressSong.Finished := true;
+  Log.LogBenchmark('Song loading', 2);
+end;
+
+{ preloading covers in HDD cache only touching the file }
+procedure TSongs.PreloadAllCovers();
+var
+  I: integer;
+  Song: TSong;
+begin
+  Log.BenchmarkStart(3);
+  Self.PreloadCover := true;
+  for I := 0 to Self.SongList.Count - 1 do
+  begin
+    if Self.Terminated then
+      Break;
+    Song := TSong(Self.SongList.Items[I]);
+    if not Self.PreloadCover then
+      RtlEventWaitFor(Self.Event);
+
+    SDL_FreeSurface(UImage.LoadImage(Song.Path.Append(Song.Cover)));
+  end;
+  Self.ProgressSong.CoversPreload := false;
+  Log.LogBenchmark('Cover loading', 3);
+end;
+
+{ Create a new thread to load songs and update main screen with progress.
+  The songs are read from the database; the directories are only searched
+  if there is no valid database or if ForceScan is set. }
+procedure TSongs.Execute();
+begin
+  Self.ProgressSong.Total := 0;
+  Self.ProgressSong.Finished := false;
+  Self.ProgressSong.CoversPreload := true;
+
+  if Self.ForceScan or (not Self.LoadFromCache()) then
+    Self.ScanDirs();
+  Self.PreloadAllCovers();
   Self.Terminate();
 end;
 

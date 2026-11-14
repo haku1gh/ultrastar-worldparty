@@ -87,6 +87,13 @@ begin
   Result := true;
   if (PressedDown) then
   begin
+    //reload songs: search the song directories again and update the song database
+    if (CharCode = Ord('r')) or (CharCode = Ord('R')) then
+    begin
+      Self.ReloadSongs(false);
+      Exit;
+    end;
+
     //check special keys
     case PressedKey of
       SDLK_ESCAPE, SDLK_BACKSPACE:
@@ -207,7 +214,12 @@ begin
   Result := true;
   ProgressSong := USongs.Songs.GetLoadProgress();
   if not ProgressSong.Finished then //while song loading show progress
-    Self.Text[Self.TextProgressSongs].Text := ProgressSong.Folder+': '+IntToStr(ProgressSong.Total)+'\n\n'+ProgressSong.FolderProcessed
+  begin
+    //also needed after a reload (F5 / R): OnShow is not called then
+    Self.Text[Self.TextProgressSongs].Visible := true;
+    Self.Text[Self.TextDescriptionLong].Visible := false;
+    Self.Text[Self.TextProgressSongs].Text := ProgressSong.Folder+': '+IntToStr(ProgressSong.Total)+'\n\n'+ProgressSong.FolderProcessed;
+  end
   else if not Self.Text[Self.TextDescriptionLong].Visible then //after finish song loading, return to normal mode and close popup
   begin
     if Self.ReturnToSongScreenAfterLoadSongs then
@@ -273,7 +285,7 @@ begin
     FreeAndNil(USongs.CatSongs);
     FreeAndNil(USongs.Songs);
     USongs.CatSongs := TCatSongs.Create();
-    USongs.Songs := TSongs.Create();
+    USongs.Songs := TSongs.Create(true); //true = search the directories, do not use the song database
     Self.ReturnToSongScreenAfterLoadSongs := ScreenReturn;
   end
   else
