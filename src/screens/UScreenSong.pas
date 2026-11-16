@@ -318,6 +318,21 @@ begin
       Self.ParseInput(SDLK_F3, 0, true);
       Exit;
     end;
+
+    // open the song menu with 'p' (same as F10, which keeps working)
+    // Only in normal mode (not in party modes) and while the search box is closed
+    // (otherwise 'p' is typed into the search by the text-input branch above).
+    // Ctrl/Alt+P keep their title/artist jump function.
+    if
+      (Self.Mode = smNormal)
+      and Self.Text[Self.SearchTextPlaceholder].Visible
+      and ((CharCode = Ord('p')) or (CharCode = Ord('P')))
+      and ((SDL_ModState and (KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT + KMOD_RALT)) = 0)
+    then
+    begin
+      Self.ParseInput(SDLK_F10, 0, true);
+      Exit;
+    end;
     //jump to artist or title letter
     if Self.FreeListMode() and ((SDL_ModState = KMOD_LCTRL) or (SDL_ModState = KMOD_LALT)) then
     begin
