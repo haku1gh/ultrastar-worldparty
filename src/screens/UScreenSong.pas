@@ -302,6 +302,22 @@ begin
     end;
 
     SDL_ModState := SDL_GetModState and (KMOD_LSHIFT + KMOD_RSHIFT + KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT  + KMOD_RALT);
+
+    // open search with 'j' (alternative to F3)
+    // Works only while the search box is closed. Once it is open, 'j' is handled by
+    // the text-input branch above and typed as a normal character; close the search
+    // with F3 / Esc / Backspace as before.
+    // Ctrl/Alt+J are left alone (they jump to a title/artist starting with 'j').
+    if
+      Self.FreeListMode()
+      and Self.Text[Self.SearchTextPlaceholder].Visible
+      and ((CharCode = Ord('j')) or (CharCode = Ord('J')))
+      and ((SDL_ModState and (KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT + KMOD_RALT)) = 0)
+    then
+    begin
+      Self.ParseInput(SDLK_F3, 0, true);
+      Exit;
+    end;
     //jump to artist or title letter
     if Self.FreeListMode() and ((SDL_ModState = KMOD_LCTRL) or (SDL_ModState = KMOD_LALT)) then
     begin
