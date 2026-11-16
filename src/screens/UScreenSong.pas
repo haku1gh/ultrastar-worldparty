@@ -333,6 +333,21 @@ begin
       Self.ParseInput(SDLK_F10, 0, true);
       Exit;
     end;
+
+    // toggle voice removal (karaoke) with 'k' (same as F7, which keeps working)
+    // Only in normal mode (not in party modes) and while the search box is closed
+    // (otherwise 'k' is typed into the search by the text-input branch above).
+    // Ctrl/Alt+K keep their title/artist jump function.
+    if
+      (Self.Mode = smNormal)
+      and Self.Text[Self.SearchTextPlaceholder].Visible
+      and ((CharCode = Ord('k')) or (CharCode = Ord('K')))
+      and ((SDL_ModState and (KMOD_LCTRL + KMOD_RCTRL + KMOD_LALT + KMOD_RALT)) = 0)
+    then
+    begin
+      Self.ParseInput(SDLK_F7, 0, true);
+      Exit;
+    end;
     //jump to artist or title letter
     if Self.FreeListMode() and ((SDL_ModState = KMOD_LCTRL) or (SDL_ModState = KMOD_LALT)) then
     begin
@@ -536,6 +551,10 @@ begin
       SDLK_F7: //voice removal
         begin
           UAudioPlaybackBase.ToggleVoiceRemoval();
+          // After singing, SongIndex <> -1 (the sung song keeps playing, set by the score screen).
+          // StartPreview would then return early and the audio would not be reopened,
+          // so the voice removal would not take effect. Reset it to force a reopen.
+          Self.SongIndex := -1;
           Self.StartPreview();
         end;
       SDLK_F10: //show menu
